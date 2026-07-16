@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+coverage/
+
+# Environment (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# Logs & OS
+*.log
+.DS_Store
+
+# Uploads / runtime
+uploads/
+
+# IDE
+.idea/
+.vscode/
+*.swp

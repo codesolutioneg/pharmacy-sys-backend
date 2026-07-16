@@ -1,0 +1,847 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TaxMode {
+  exclusive
+  inclusive
+  zero_rated
+  exempt
+}
+
+enum ActiveStatus {
+  active
+  inactive
+}
+
+enum ProductKind {
+  inventory
+  ecommerce
+  global
+}
+
+enum CategoryKind {
+  inventory
+  ecommerce
+}
+
+enum Gender {
+  male
+  female
+  other
+}
+
+enum DiscountType {
+  percent
+  fixed
+}
+
+enum InvoiceType {
+  pos
+  sale
+}
+
+enum LedgerInvoiceType {
+  sale
+  purchase
+  expense
+  manual
+  sale_return
+  purchase_return
+}
+
+model Shop {
+  id                  Int      @id @default(autoincrement())
+  name                String
+  nameAr              String?  @map("name_ar")
+  siteTitle           String?  @map("site_title")
+  siteLogo            String?  @map("site_logo")
+  favicon             String?
+  address             String?
+  phone               String?
+  email               String?
+  currency            String   @default("EGP")
+  currencySymbol      String?  @map("currency_symbol")
+  timeZone            String   @default("Africa/Cairo") @map("time_zone")
+  locale              String   @default("ar")
+  prefix              String?  @default("INV")
+  invoiceNumberFormat String   @default("INV-{YYYY}-{SEQ:6}") @map("invoice_number_format")
+  taxMode             TaxMode  @default(exclusive) @map("tax_mode")
+  taxRatePercent      Decimal  @default(0) @map("tax_rate_percent") @db.Decimal(5, 2)
+  lowStockAlert       Int      @default(0) @map("low_stock_alert")
+  upcomingExpireAlert Int      @default(7) @map("upcoming_expire_alert")
+  smtpHost            String?  @map("smtp_host")
+  smtpPort            Int?     @map("smtp_port")
+  smtpUser            String?  @map("smtp_user")
+  smtpPass            String?  @map("smtp_pass")
+  smtpSecure          Boolean  @default(false) @map("smtp_secure")
+  smtpFrom            String?  @map("smtp_from")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  users             User[]
+  settings          Setting[]
+  customers         Customer[]
+  suppliers         Supplier[]
+  vendors           Vendor[]
+  paymentMethods    PaymentMethod[]
+  productCategories ProductCategory[]
+  medicineTypes     MedicineType[]
+  units             Unit[]
+  leaves            Leaf[]
+  medicines         Medicine[]
+  batches           Batch[]
+  purchases         Purchase[]
+  purchasePays      PurchasePay[]
+  purchaseReturns   PurchaseReturn[]
+  invoices          Invoice[]
+  invoicePays       InvoicePay[]
+  saleReturns       SaleReturn[]
+  expenseCategories ExpenseCategory[]
+  expenses          PharmacyExpense[]
+  prescriptions     Prescription[]
+  notifications     Notification[]
+  languages         Language[]
+  posCarts          PosCart[]
+  purchaseDrafts    PurchaseDraft[]
+
+  @@map("shops")
+}
+
+model Role {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  displayName String   @map("display_name")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id        Int      @id @default(autoincrement())
+  module    String
+  label     String
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  roles RolePermission[]
+
+  @@index([module])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       Int @map("role_id")
+  permissionId Int @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model User {
+  id              Int       @id @default(autoincrement())
+  name            String
+  email           String    @unique
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  password        String
+  shopId          Int       @map("shop_id")
+  roleId          Int       @map("role_id")
+  lastLogin       DateTime? @map("last_login")
+  image           String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  shop          Shop           @relation(fields: [shopId], references: [id])
+  role          Role           @relation(fields: [roleId], references: [id])
+  refreshTokens RefreshToken[]
+
+  @@index([shopId])
+  @@index([roleId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        Int       @id @default(autoincrement())
+  email     String
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([email])
+  @@map("password_reset_tokens")
+}
+
+model Setting {
+  id        Int      @id @default(autoincrement())
+  name      String
+  value     String?
+  shopId    Int?     @map("shop_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, name])
+  @@map("settings")
+}
+
+model Customer {
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  name      String
+  email     String
+  phone     String
+  address   String?
+  due       Decimal  @default(0) @db.Decimal(20, 2)
+  gender    String?  @default("Male")
+  age       Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop        Shop         @relation(fields: [shopId], references: [id])
+  invoices    Invoice[]
+  invoicePays InvoicePay[]
+
+  @@unique([shopId, email])
+  @@unique([shopId, phone])
+  @@index([shopId])
+  @@map("customers")
+}
+
+model Supplier {
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  name      String
+  phone     String
+  address   String?
+  due       Decimal  @default(0) @db.Decimal(20, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop         Shop          @relation(fields: [shopId], references: [id])
+  medicines    Medicine[]
+  purchases    Purchase[]
+  purchasePays PurchasePay[]
+
+  @@unique([shopId, phone])
+  @@index([shopId])
+  @@map("suppliers")
+}
+
+model Vendor {
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  name      String
+  phone     String
+  address   String
+  due       Decimal  @default(0) @db.Decimal(20, 2)
+  payable   Decimal  @default(0) @db.Decimal(20, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop      Shop       @relation(fields: [shopId], references: [id])
+  medicines Medicine[]
+
+  @@index([shopId])
+  @@map("vendors")
+}
+
+model PaymentMethod {
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  name      String
+  balance   Decimal  @default(0) @db.Decimal(20, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop         Shop          @relation(fields: [shopId], references: [id])
+  purchases    Purchase[]
+  purchasePays PurchasePay[]
+  invoices     Invoice[]
+  invoicePays  InvoicePay[]
+
+  @@unique([shopId, name])
+  @@index([shopId])
+  @@map("payment_methods")
+}
+
+model ProductCategory {
+  id        Int          @id @default(autoincrement())
+  shopId    Int          @map("shop_id")
+  title     String
+  slug      String
+  type      CategoryKind @default(inventory)
+  status    ActiveStatus @default(active)
+  sorting   Int          @default(0)
+  image     String?
+  banner    String?
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@unique([shopId, slug])
+  @@index([shopId])
+  @@map("product_categories")
+}
+
+model MedicineType {
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  name      String
+  status    Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop      Shop       @relation(fields: [shopId], references: [id])
+  medicines Medicine[]
+
+  @@unique([shopId, name])
+  @@index([shopId])
+  @@map("medicine_types")
+}
+
+model Unit {
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  name      String
+  status    Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop              Shop       @relation(fields: [shopId], references: [id])
+  medicinesPurchase Medicine[] @relation("PurchaseUnit")
+  medicinesSell     Medicine[] @relation("SellUnit")
+
+  @@unique([shopId, name])
+  @@index([shopId])
+  @@map("units")
+}
+
+model Leaf {
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  name      String
+  /// Units per pack/box — conversion multiplier
+  amount    Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop      Shop       @relation(fields: [shopId], references: [id])
+  medicines Medicine[]
+  batches   Batch[]
+
+  @@unique([shopId, name])
+  @@index([shopId])
+  @@map("leaves")
+}
+
+/// Canonical medicine catalog (Laravel Eloquent Medicine → products table)
+model Medicine {
+  id             Int          @id @default(autoincrement())
+  shopId         Int          @map("shop_id")
+  qrCode         String       @map("qr_code")
+  name           String
+  nameAr         String?      @map("name_ar")
+  slug           String?
+  genericName    String?      @map("generic_name")
+  price          Decimal      @default(0) @db.Decimal(20, 2)
+  buyPrice       Decimal      @default(0) @map("buy_price") @db.Decimal(20, 2)
+  quantity       Int          @default(0)
+  instock        Int          @default(0)
+  strength       String?
+  leafId         Int?         @map("leaf_id")
+  typeId         Int?         @map("type_id")
+  purchaseUnitId Int?         @map("purchase_unit_id")
+  sellUnitId     Int?         @map("sell_unit_id")
+  unitConversion Decimal      @default(1) @map("unit_conversion") @db.Decimal(20, 6)
+  shelf          String?
+  categoryIds    Json         @default("[]") @map("category_ids")
+  barcodes       Json         @default("[]")
+  supplierId     Int?         @map("supplier_id")
+  vendorId       Int?         @map("vendor_id")
+  kind           ProductKind  @default(inventory) @map("type")
+  vat            Decimal      @default(0) @db.Decimal(8, 2)
+  discount       Decimal      @default(0) @db.Decimal(8, 2)
+  taxMode        TaxMode?     @map("tax_mode")
+  description    String?
+  status         ActiveStatus @default(active)
+  image          String?
+  igta           String?
+  hnsCode        String?      @map("hns_code")
+  reorderLevel   Int          @default(0) @map("reorder_level")
+  minStock       Int          @default(0) @map("min_stock")
+  maxStock       Int          @default(0) @map("max_stock")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  shop         Shop          @relation(fields: [shopId], references: [id])
+  leaf         Leaf?         @relation(fields: [leafId], references: [id])
+  medicineType MedicineType? @relation(fields: [typeId], references: [id])
+  purchaseUnit Unit?         @relation("PurchaseUnit", fields: [purchaseUnitId], references: [id])
+  sellUnit     Unit?         @relation("SellUnit", fields: [sellUnitId], references: [id])
+  supplier     Supplier?     @relation(fields: [supplierId], references: [id])
+  vendor       Vendor?       @relation(fields: [vendorId], references: [id])
+  batches      Batch[]
+
+  @@unique([shopId, qrCode])
+  @@index([shopId])
+  @@index([name])
+  @@map("products")
+}
+
+model Batch {
+  id                Int           @id @default(autoincrement())
+  shopId            Int           @map("shop_id")
+  name              String?
+  medicineId        Int           @map("medicine_id")
+  qty               Int           @default(0)
+  purchaseQty       Int           @map("purchase_qty")
+  expire            DateTime?     @db.Date
+  manufacturedAt    DateTime?     @map("manufactured_at") @db.Date
+  leafId            Int?          @map("leaf_id")
+  invId             String?       @map("inv_id")
+  price             Decimal       @default(0) @db.Decimal(20, 8)
+  buyPrice          Decimal       @default(0) @map("buy_price") @db.Decimal(20, 8)
+  discount          Decimal       @default(0) @db.Decimal(20, 2)
+  discountValueType DiscountType? @map("discount_value_type")
+  subTotal          Decimal       @default(0) @map("sub_total") @db.Decimal(20, 2)
+  total             Decimal       @default(0) @db.Decimal(20, 2)
+  purchaseId        Int?          @map("purchase_id")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  shop            Shop             @relation(fields: [shopId], references: [id])
+  medicine        Medicine         @relation(fields: [medicineId], references: [id])
+  leaf            Leaf?            @relation(fields: [leafId], references: [id])
+  purchase        Purchase?        @relation(fields: [purchaseId], references: [id])
+  purchaseReturns PurchaseReturn[]
+  saleReturns     SaleReturn[]
+
+  @@index([shopId])
+  @@index([medicineId])
+  @@index([expire])
+  @@index([purchaseId])
+  @@map("batches")
+}
+
+model Purchase {
+  id           Int      @id @default(autoincrement())
+  shopId       Int      @map("shop_id")
+  supplierId   Int      @map("supplier_id")
+  methodId     Int?     @map("method_id")
+  invId        String   @map("inv_id")
+  date         DateTime @db.Date
+  subtotal     Decimal  @default(0) @db.Decimal(20, 2)
+  discount     Decimal  @default(0) @db.Decimal(20, 2)
+  totalPrice   Decimal  @map("total_price") @db.Decimal(20, 2)
+  paidAmount   Decimal  @default(0) @map("paid_amount") @db.Decimal(20, 2)
+  duePrice     Decimal  @default(0) @map("due_price") @db.Decimal(20, 2)
+  changeAmount Decimal  @default(0) @map("change_amount") @db.Decimal(20, 2)
+  qty          Int      @default(0)
+  medicines    Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  shop     Shop             @relation(fields: [shopId], references: [id])
+  supplier Supplier         @relation(fields: [supplierId], references: [id])
+  method   PaymentMethod?   @relation(fields: [methodId], references: [id])
+  batches  Batch[]
+  pays     PurchasePay[]
+  returns  PurchaseReturn[]
+
+  @@unique([shopId, invId])
+  @@index([shopId])
+  @@index([supplierId])
+  @@map("purchases")
+}
+
+model PurchasePay {
+  id         Int      @id @default(autoincrement())
+  shopId     Int      @map("shop_id")
+  purchaseId Int      @map("purchase_id")
+  supplierId Int      @map("supplier_id")
+  methodId   Int?     @map("method_id")
+  amount     Decimal  @db.Decimal(20, 2)
+  date       DateTime @db.Date
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  shop     Shop           @relation(fields: [shopId], references: [id])
+  purchase Purchase       @relation(fields: [purchaseId], references: [id])
+  supplier Supplier       @relation(fields: [supplierId], references: [id])
+  method   PaymentMethod? @relation(fields: [methodId], references: [id])
+
+  @@index([shopId])
+  @@index([purchaseId])
+  @@map("purchase_pays")
+}
+
+/// Node-only staging area for the purchase cart flow (Laravel used a session array).
+/// Deleted/finalized on commit; never a source of truth once a Purchase is created.
+model PurchaseDraft {
+  id                   Int          @id @default(autoincrement())
+  shopId               Int          @map("shop_id")
+  userId               Int          @map("user_id")
+  supplierId           Int?         @map("supplier_id")
+  methodId             Int?         @map("method_id")
+  paidAmount           Decimal      @default(0) @map("paid_amount") @db.Decimal(20, 2)
+  invoiceDiscountValue Decimal      @default(0) @map("invoice_discount_value") @db.Decimal(20, 2)
+  invoiceDiscountType  DiscountType @default(fixed) @map("invoice_discount_type")
+  lines                Json         @default("[]")
+  status               String       @default("open")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@index([shopId])
+  @@index([userId])
+  @@map("purchase_drafts")
+}
+
+model PurchaseReturn {
+  id         Int      @id @default(autoincrement())
+  shopId     Int      @map("shop_id")
+  purchaseId Int      @map("purchase_id") // clean name; no typo table column
+  batchId    Int      @map("batch_id")
+  amount     Decimal  @db.Decimal(20, 2)
+  quantity   Int
+  date       DateTime @db.Date
+  medicines  Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  shop     Shop     @relation(fields: [shopId], references: [id])
+  purchase Purchase @relation(fields: [purchaseId], references: [id])
+  batch    Batch    @relation(fields: [batchId], references: [id])
+
+  @@index([shopId])
+  @@index([purchaseId])
+  @@map("purchase_returns")
+}
+
+model Invoice {
+  id             Int         @id @default(autoincrement())
+  shopId         Int         @map("shop_id")
+  customerId     Int?        @map("customer_id")
+  methodId       Int         @map("method_id")
+  invId          String      @map("inv_id")
+  name           String      @default("")
+  phone          String?
+  address        String?
+  date           DateTime    @db.Date
+  subtotal       Decimal     @default(0) @db.Decimal(20, 2)
+  discount       Decimal     @default(0) @db.Decimal(20, 2)
+  tax            Decimal     @default(0) @db.Decimal(20, 2)
+  totalPrice     Decimal     @map("total_price") @db.Decimal(20, 2)
+  paidAmount     Decimal     @default(0) @map("paid_amount") @db.Decimal(20, 2)
+  duePrice       Decimal     @default(0) @map("due_price") @db.Decimal(20, 2)
+  returnedAmount Decimal     @default(0) @map("returned_amount") @db.Decimal(20, 2)
+  qty            Int         @default(0)
+  type           InvoiceType @default(pos)
+  status         Int         @default(0)
+  medicines      Json?
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  shop        Shop          @relation(fields: [shopId], references: [id])
+  customer    Customer?     @relation(fields: [customerId], references: [id])
+  method      PaymentMethod @relation(fields: [methodId], references: [id])
+  pays        InvoicePay[]
+  saleReturns SaleReturn[]
+
+  @@unique([shopId, invId])
+  @@index([shopId])
+  @@index([customerId])
+  @@map("invoices")
+}
+
+model InvoicePay {
+  id         Int      @id @default(autoincrement())
+  shopId     Int      @map("shop_id")
+  invoiceId  Int      @map("invoice_id")
+  customerId Int?     @map("customer_id")
+  methodId   Int      @map("method_id")
+  amount     Decimal  @db.Decimal(20, 2)
+  date       DateTime @db.Date
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  shop     Shop          @relation(fields: [shopId], references: [id])
+  invoice  Invoice       @relation(fields: [invoiceId], references: [id])
+  customer Customer?     @relation(fields: [customerId], references: [id])
+  method   PaymentMethod @relation(fields: [methodId], references: [id])
+
+  @@index([shopId])
+  @@index([invoiceId])
+  @@map("invoice_pays")
+}
+
+model SaleReturn {
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  invoiceId Int      @map("invoice_id")
+  batchId   Int      @map("batch_id")
+  amount    Decimal  @db.Decimal(20, 2)
+  quantity  Int
+  date      DateTime @db.Date
+  medicines Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop    Shop    @relation(fields: [shopId], references: [id])
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+  batch   Batch   @relation(fields: [batchId], references: [id])
+
+  @@index([shopId])
+  @@index([invoiceId])
+  @@map("sale_returns")
+}
+
+/// Node-only staging area for the POS cart flow (Laravel used a session array).
+/// Deleted/finalized on checkout; never a source of truth once an Invoice is created.
+model PosCart {
+  id                   Int          @id @default(autoincrement())
+  shopId               Int          @map("shop_id")
+  userId               Int          @map("user_id")
+  customerId           Int?         @map("customer_id")
+  methodId             Int?         @map("method_id")
+  /// Overrides shop.taxRatePercent for this cart only when set.
+  taxRateOverride      Decimal?     @map("tax_rate_override") @db.Decimal(5, 2)
+  /// Overrides the computed tax amount outright when set (takes precedence over taxRateOverride).
+  taxAmountOverride    Decimal?     @map("tax_amount_override") @db.Decimal(20, 2)
+  invoiceDiscountValue Decimal      @default(0) @map("invoice_discount_value") @db.Decimal(20, 2)
+  invoiceDiscountType  DiscountType @default(fixed) @map("invoice_discount_type")
+  paidAmount           Decimal      @default(0) @map("paid_amount") @db.Decimal(20, 2)
+  items                Json         @default("[]")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@index([shopId, userId])
+  @@map("pos_carts")
+}
+
+model ExpenseCategory {
+  id          Int          @id @default(autoincrement())
+  shopId      Int          @map("shop_id")
+  name        String
+  description String?
+  status      ActiveStatus @default(active)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  shop     Shop              @relation(fields: [shopId], references: [id])
+  expenses PharmacyExpense[]
+
+  @@unique([shopId, name])
+  @@index([shopId])
+  @@map("expense_categories")
+}
+
+model PharmacyExpense {
+  id         Int      @id @default(autoincrement())
+  shopId     Int      @map("shop_id")
+  categoryId Int      @map("category_id")
+  accountId  Int?     @map("account_id")
+  date       DateTime @db.Date
+  title      String
+  amount     Decimal  @db.Decimal(20, 2)
+  reference  String?
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  shop     Shop            @relation(fields: [shopId], references: [id])
+  category ExpenseCategory @relation(fields: [categoryId], references: [id])
+  account  Account?        @relation(fields: [accountId], references: [id])
+
+  @@index([shopId])
+  @@map("pharmacy_expenses")
+}
+
+model AccountType {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  status      ActiveStatus @default(active)
+  serial      Int          @default(1)
+  isDeletable Boolean      @default(true) @map("is_deletable")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  accounts Account[]
+
+  @@map("account_types")
+}
+
+model Account {
+  id            Int          @id @default(autoincrement())
+  accountTypeId Int          @map("account_type_id")
+  name          String
+  status        ActiveStatus @default(active)
+  serial        Int          @default(1)
+  isDeletable   Boolean      @default(true) @map("is_deletable")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  accountType   AccountType         @relation(fields: [accountTypeId], references: [id])
+  debitEntries  LedgerTransaction[] @relation("DebitAccount")
+  creditEntries LedgerTransaction[] @relation("CreditAccount")
+  expenses      PharmacyExpense[]
+
+  @@map("accounts")
+}
+
+model LedgerTransaction {
+  id              Int                @id @default(autoincrement())
+  tranId          String             @unique @map("tran_id")
+  date            DateTime           @db.Date
+  debitAccountId  Int                @map("debit_account_id")
+  creditAccountId Int                @map("credit_account_id")
+  amount          Decimal            @db.Decimal(20, 2)
+  invoiceType     LedgerInvoiceType? @map("invoice_type")
+  invoiceId       String?            @map("invoice_id")
+  particular      String?
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  debitAccount  Account @relation("DebitAccount", fields: [debitAccountId], references: [id])
+  creditAccount Account @relation("CreditAccount", fields: [creditAccountId], references: [id])
+
+  @@index([date])
+  @@map("ledger_transactions")
+}
+
+/// Global master data (no shop_id) — matches Laravel's un-scoped doctors table.
+model Doctor {
+  id         Int      @id @default(autoincrement())
+  name       String
+  title      String
+  phone      String
+  speciality String
+  address    String?
+  hospital   String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  prescriptions Prescription[]
+
+  @@map("doctors")
+}
+
+/// Global master data (no shop_id) — matches Laravel's un-scoped patients table.
+model Patient {
+  id        Int      @id @default(autoincrement())
+  name      String
+  phone     String
+  address   String
+  gender    Gender
+  age       Int
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  prescriptions Prescription[]
+
+  @@map("patients")
+}
+
+/// Global master data (no shop_id) — matches Laravel's un-scoped tests table.
+model LabTest {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  center    String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("lab_tests")
+}
+
+model Prescription {
+  id             Int      @id @default(autoincrement())
+  shopId         Int      @map("shop_id")
+  prescriptionNo String   @map("prescription_no")
+  patientId      Int      @map("patient_id")
+  doctorId       Int      @map("doctor_id")
+  date           DateTime @db.Date
+  visitNo        Int      @map("visit_no")
+  visitFees      Decimal  @default(0) @map("visit_fees") @db.Decimal(20, 2)
+  tests          Json
+  medicines      Json
+  description    String
+  advice         String
+  prescribedBy   String?  @map("prescribed_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  shop    Shop    @relation(fields: [shopId], references: [id])
+  patient Patient @relation(fields: [patientId], references: [id])
+  doctor  Doctor  @relation(fields: [doctorId], references: [id])
+
+  @@unique([shopId, prescriptionNo])
+  @@index([shopId])
+  @@map("prescriptions")
+}
+
+model Notification {
+  id          Int      @id @default(autoincrement())
+  shopId      Int      @map("shop_id")
+  senderId    Int?     @map("sender_id")
+  receiverId  Int?     @map("receiver_id")
+  title       String?
+  description String?
+  seen        Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@index([shopId, receiverId])
+  @@map("notifications")
+}
+
+model Language {
+  id        Int          @id @default(autoincrement())
+  shopId    Int?         @map("shop_id")
+  name      String
+  iso       String
+  icon      String?
+  status    ActiveStatus @default(active)
+  terms     Json         @default("{}")
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  shop Shop? @relation(fields: [shopId], references: [id])
+
+  @@unique([iso])
+  @@map("languages")
+}
