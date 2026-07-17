@@ -153,6 +153,43 @@ Run tests against a disposable test database (`DATABASE_URL` in CI).
 
 ---
 
+## 4b. Deploying to Vercel
+
+The repo includes `vercel.json` and `api/index.ts`, which wrap the Express app as a
+serverless function. Two things are mandatory or the function crashes at startup
+with `500 FUNCTION_INVOCATION_FAILED`:
+
+1. **Environment variables** — the app validates its env on boot and throws if any
+   required variable is missing. In the Vercel dashboard (Project → Settings →
+   Environment Variables) set at minimum:
+
+   | Variable | Notes |
+   |----------|-------|
+   | `DATABASE_URL` | Must point to a **hosted** PostgreSQL (Neon, Supabase, Railway, RDS...). `localhost` will not work from Vercel. |
+   | `JWT_ACCESS_SECRET` | Random string, minimum 32 characters |
+   | `JWT_REFRESH_SECRET` | Random string, minimum 32 characters |
+   | `NODE_ENV` | `production` |
+   | `CORS_ORIGINS` | Comma-separated allowed frontend origins |
+
+   All other variables from `.env.example` are optional and have defaults.
+
+2. **Database migrations + seed** — run once against the hosted database from your
+   machine:
+
+   ```bash
+   DATABASE_URL="postgresql://...hosted-db..." npx prisma migrate deploy
+   DATABASE_URL="postgresql://...hosted-db..." npm run db:seed
+   ```
+
+After redeploying, verify `https://<your-domain>/api/health` and open Swagger at
+`https://<your-domain>/api/docs`.
+
+> Note: Vercel functions are stateless and short-lived. For heavy report
+> generation (PDF/Excel) or long-running workloads, a persistent Node host
+> (Railway, Render, a VPS with PM2) is the better fit — see section 4 above.
+
+---
+
 ## 5. Post-deploy verification
 
 | Check | Command / URL |
