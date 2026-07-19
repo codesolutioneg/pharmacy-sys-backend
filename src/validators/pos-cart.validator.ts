@@ -35,6 +35,12 @@ export const updateCartSchema = z
     insuranceCompanyId: z.coerce.number().int().positive().nullable().optional(),
     insurancePercent: z.coerce.number().min(0).max(100).nullable().optional(),
     patientMethodId: z.coerce.number().int().positive().nullable().optional(),
+    isDelivery: z.boolean().optional(),
+    deliveryName: z.string().max(255).nullable().optional(),
+    deliveryPhone: z.string().max(50).nullable().optional(),
+    deliveryAddress: z.string().max(500).nullable().optional(),
+    deliveryNote: z.string().max(500).nullable().optional(),
+    assignedCashierId: z.coerce.number().int().positive().nullable().optional(),
   })
   .refine((data) => data.taxRate === undefined || data.taxAmount === undefined, {
     message: 'Provide either taxRate or taxAmount, not both',

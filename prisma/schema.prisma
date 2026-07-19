@@ -60,6 +60,19 @@ enum SessionStatus {
   closed
 }
 
+enum FulfillmentChannel {
+  counter
+  delivery
+}
+
+enum DeliveryStatus {
+  pending
+  assigned
+  out_for_delivery
+  settled
+  cancelled
+}
+
 model Shop {
   id                  Int      @id @default(autoincrement())
   name                String
@@ -175,6 +188,9 @@ model User {
   role          Role           @relation(fields: [roleId], references: [id])
   refreshTokens RefreshToken[]
   posSessions   PosSession[]
+  createdDeliveryInvoices  Invoice[] @relation("InvoiceCreatedBy")
+  assignedDeliveryInvoices Invoice[] @relation("InvoiceAssignedCashier")
+  settledDeliveryInvoices  Invoice[] @relation("InvoiceSettledBy")
 
   @@index([shopId])
   @@index([roleId])
@@ -605,39 +621,49 @@ model PurchaseReturn {
 }
 
 model Invoice {
-  id                   Int         @id @default(autoincrement())
-  shopId               Int         @map("shop_id")
-  customerId           Int?        @map("customer_id")
-  methodId             Int         @map("method_id")
-  sessionId            Int?        @map("session_id")
-  insuranceCompanyId   Int?        @map("insurance_company_id")
-  invId                String      @map("inv_id")
-  name                 String      @default("")
+  id                   Int                 @id @default(autoincrement())
+  shopId               Int                 @map("shop_id")
+  customerId           Int?                @map("customer_id")
+  methodId             Int                 @map("method_id")
+  sessionId            Int?                @map("session_id")
+  insuranceCompanyId   Int?                @map("insurance_company_id")
+  invId                String              @map("inv_id")
+  name                 String              @default("")
   phone                String?
   address              String?
-  date                 DateTime    @db.Date
-  subtotal             Decimal     @default(0) @db.Decimal(20, 2)
-  discount             Decimal     @default(0) @db.Decimal(20, 2)
-  tax                  Decimal     @default(0) @db.Decimal(20, 2)
-  taxRatePercent       Decimal     @default(0) @map("tax_rate_percent") @db.Decimal(5, 2)
-  totalPrice           Decimal     @map("total_price") @db.Decimal(20, 2)
-  paidAmount           Decimal     @default(0) @map("paid_amount") @db.Decimal(20, 2)
-  duePrice             Decimal     @default(0) @map("due_price") @db.Decimal(20, 2)
-  returnedAmount       Decimal     @default(0) @map("returned_amount") @db.Decimal(20, 2)
-  insurancePercent     Decimal     @default(0) @map("insurance_percent") @db.Decimal(5, 2)
-  insuranceAmount      Decimal     @default(0) @map("insurance_amount") @db.Decimal(20, 2)
-  qty                  Int         @default(0)
-  type                 InvoiceType @default(pos)
-  status               Int         @default(0)
+  date                 DateTime            @db.Date
+  subtotal             Decimal             @default(0) @db.Decimal(20, 2)
+  discount             Decimal             @default(0) @db.Decimal(20, 2)
+  tax                  Decimal             @default(0) @db.Decimal(20, 2)
+  taxRatePercent       Decimal             @default(0) @map("tax_rate_percent") @db.Decimal(5, 2)
+  totalPrice           Decimal             @map("total_price") @db.Decimal(20, 2)
+  paidAmount           Decimal             @default(0) @map("paid_amount") @db.Decimal(20, 2)
+  duePrice             Decimal             @default(0) @map("due_price") @db.Decimal(20, 2)
+  returnedAmount       Decimal             @default(0) @map("returned_amount") @db.Decimal(20, 2)
+  insurancePercent     Decimal             @default(0) @map("insurance_percent") @db.Decimal(5, 2)
+  insuranceAmount      Decimal             @default(0) @map("insurance_amount") @db.Decimal(20, 2)
+  qty                  Int                 @default(0)
+  type                 InvoiceType         @default(pos)
+  status               Int                 @default(0)
+  fulfillmentChannel   FulfillmentChannel  @default(counter) @map("fulfillment_channel")
+  deliveryStatus       DeliveryStatus?     @map("delivery_status")
+  createdById          Int?                @map("created_by_id")
+  assignedCashierId    Int?                @map("assigned_cashier_id")
+  settledById          Int?                @map("settled_by_id")
+  settledAt            DateTime?           @map("settled_at")
+  deliveryNote         String?             @map("delivery_note")
   medicines            Json?
-  createdAt            DateTime    @default(now()) @map("created_at")
-  updatedAt            DateTime    @updatedAt @map("updated_at")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
 
   shop             Shop              @relation(fields: [shopId], references: [id])
   customer         Customer?         @relation(fields: [customerId], references: [id])
   method           PaymentMethod     @relation(fields: [methodId], references: [id])
   session          PosSession?       @relation(fields: [sessionId], references: [id])
   insuranceCompany InsuranceCompany? @relation(fields: [insuranceCompanyId], references: [id])
+  createdBy        User?             @relation("InvoiceCreatedBy", fields: [createdById], references: [id])
+  assignedCashier  User?             @relation("InvoiceAssignedCashier", fields: [assignedCashierId], references: [id])
+  settledBy        User?             @relation("InvoiceSettledBy", fields: [settledById], references: [id])
   pays             InvoicePay[]
   saleReturns      SaleReturn[]
 
@@ -646,6 +672,9 @@ model Invoice {
   @@index([customerId])
   @@index([sessionId])
   @@index([insuranceCompanyId])
+  @@index([shopId, fulfillmentChannel, deliveryStatus])
+  @@index([shopId, assignedCashierId])
+  @@index([createdById])
   @@map("invoices")
 }
 
@@ -709,6 +738,12 @@ model PosCart {
   invoiceDiscountValue Decimal      @default(0) @map("invoice_discount_value") @db.Decimal(20, 2)
   invoiceDiscountType  DiscountType @default(fixed) @map("invoice_discount_type")
   paidAmount           Decimal      @default(0) @map("paid_amount") @db.Decimal(20, 2)
+  isDelivery           Boolean      @default(false) @map("is_delivery")
+  deliveryName         String?      @map("delivery_name")
+  deliveryPhone        String?      @map("delivery_phone")
+  deliveryAddress      String?      @map("delivery_address")
+  deliveryNote         String?      @map("delivery_note")
+  assignedCashierId    Int?         @map("assigned_cashier_id")
   items                Json         @default("[]")
   createdAt            DateTime     @default(now()) @map("created_at")
   updatedAt            DateTime     @updatedAt @map("updated_at")

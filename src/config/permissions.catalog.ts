@@ -194,6 +194,13 @@ const groups: Record<string, Array<{ label: string; name: string }>> = {
     { label: 'Update', name: 'insurance.update' },
     { label: 'Delete', name: 'insurance.destroy' },
   ],
+  Delivery: [
+    { label: 'Index', name: 'delivery.index' },
+    { label: 'Assign', name: 'delivery.assign' },
+    { label: 'Settle', name: 'delivery.settle' },
+    { label: 'Cancel', name: 'delivery.cancel' },
+    { label: 'Update status', name: 'delivery.update_status' },
+  ],
 };
 
 /** Note: Laravel seeder duplicated `language.destroy` for Terms Edit; Node uses `language.terms.update` for clarity while keeping destroy. */

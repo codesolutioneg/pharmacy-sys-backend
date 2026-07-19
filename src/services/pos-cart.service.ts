@@ -47,6 +47,12 @@ type UpdateCartMetaInput = {
   insuranceCompanyId?: number | null;
   insurancePercent?: number | null;
   patientMethodId?: number | null;
+  isDelivery?: boolean;
+  deliveryName?: string | null;
+  deliveryPhone?: string | null;
+  deliveryAddress?: string | null;
+  deliveryNote?: string | null;
+  assignedCashierId?: number | null;
 };
 
 type CartMeta = {
@@ -359,6 +365,14 @@ export const posCartService = {
         throw new AppError(400, 'INVALID_INSURANCE_COMPANY', 'Insurance company not found');
       }
     }
+    if (data.assignedCashierId !== undefined && data.assignedCashierId !== null) {
+      const cashier = await prisma.user.findFirst({
+        where: { id: data.assignedCashierId, shopId },
+      });
+      if (!cashier) {
+        throw new AppError(400, 'INVALID_CASHIER', 'Assigned cashier not found for this shop');
+      }
+    }
     if (data.taxRate !== undefined && data.taxAmount !== undefined) {
       throw new AppError(
         400,
@@ -393,6 +407,12 @@ export const posCartService = {
               : toMoneyString(data.insurancePercent)
             : undefined,
         patientMethodId: data.patientMethodId,
+        isDelivery: data.isDelivery,
+        deliveryName: data.deliveryName,
+        deliveryPhone: data.deliveryPhone,
+        deliveryAddress: data.deliveryAddress,
+        deliveryNote: data.deliveryNote,
+        assignedCashierId: data.assignedCashierId,
       },
     });
   },
@@ -410,6 +430,12 @@ export const posCartService = {
     invoiceDiscountValue: Prisma.Decimal;
     invoiceDiscountType: DiscountType;
     items: Prisma.JsonValue;
+    isDelivery: boolean;
+    deliveryName: string | null;
+    deliveryPhone: string | null;
+    deliveryAddress: string | null;
+    deliveryNote: string | null;
+    assignedCashierId: number | null;
   }) {
     const shop = await getShopOrThrow(shopId);
     const items = toItemRecords(cart.items);
@@ -419,7 +445,7 @@ export const posCartService = {
     let patientAmount = totals.grandTotal;
     const insurancePercent =
       cart.insurancePercent !== null ? toDecimal(cart.insurancePercent.toString()) : toDecimal(0);
-    if (insurancePercent.greaterThan(0)) {
+    if (insurancePercent.greaterThan(0) && !cart.isDelivery) {
       insuranceAmount = pct(totals.grandTotal, insurancePercent);
       patientAmount = sub(totals.grandTotal, insuranceAmount);
     }
@@ -448,6 +474,12 @@ export const posCartService = {
         value: toDecimal(cart.invoiceDiscountValue.toString()).toFixed(2),
         type: cart.invoiceDiscountType,
       },
+      isDelivery: cart.isDelivery,
+      deliveryName: cart.deliveryName,
+      deliveryPhone: cart.deliveryPhone,
+      deliveryAddress: cart.deliveryAddress,
+      deliveryNote: cart.deliveryNote,
+      assignedCashierId: cart.assignedCashierId,
       items: totals.lines.map((l) => ({
         id: l.id,
         medicineId: l.medicineId,
@@ -468,8 +500,8 @@ export const posCartService = {
       insuranceAmount: insuranceAmount.toFixed(2),
       patientAmount: patientAmount.toFixed(2),
       qty: totals.qty,
-      due: (insurancePercent.greaterThan(0) ? patientDue : totals.due).toFixed(2),
-      change: (insurancePercent.greaterThan(0) ? change : totals.change).toFixed(2),
+      due: (insurancePercent.greaterThan(0) && !cart.isDelivery ? patientDue : totals.due).toFixed(2),
+      change: (insurancePercent.greaterThan(0) && !cart.isDelivery ? change : totals.change).toFixed(2),
     };
   },
 
@@ -513,6 +545,14 @@ export const posCartService = {
     }
 
     const isInsuranceSale = method.isInsurance;
+    if (cart.isDelivery && isInsuranceSale) {
+      throw new AppError(
+        422,
+        'DELIVERY_INSURANCE_NOT_ALLOWED',
+        'Delivery COD orders cannot use an insurance payment method',
+      );
+    }
+
     let insuranceCompany = null;
     let insurancePercent = toDecimal(0);
     let insuranceAmount = toDecimal(0);
@@ -593,7 +633,7 @@ export const posCartService = {
       }
     }
 
-    if (due.greaterThan(0) && !cart.customerId) {
+    if (due.greaterThan(0) && !cart.customerId && !cart.isDelivery) {
       throw new AppError(422, 'CUSTOMER_REQUIRED', 'A customer is required when dueAmount > 0');
     }
 
@@ -602,6 +642,30 @@ export const posCartService = {
       customer = await prisma.customer.findFirst({ where: { id: cart.customerId, shopId } });
       if (!customer) {
         throw new AppError(400, 'INVALID_CUSTOMER', 'Customer not found for this shop');
+      }
+    }
+
+    const finalName =
+      (cart.deliveryName ?? '').trim() || customer?.name?.trim() || '';
+    const finalPhone =
+      (cart.deliveryPhone ?? '').trim() || customer?.phone?.trim() || null;
+    const finalAddress =
+      (cart.deliveryAddress ?? '').trim() || customer?.address?.trim() || null;
+
+    if (cart.isDelivery && (!finalName || !finalPhone || !finalAddress)) {
+      throw new AppError(
+        422,
+        'DELIVERY_CONTACT_REQUIRED',
+        'Delivery name, phone, and address are required',
+      );
+    }
+
+    if (cart.isDelivery && cart.assignedCashierId) {
+      const assignee = await prisma.user.findFirst({
+        where: { id: cart.assignedCashierId, shopId },
+      });
+      if (!assignee) {
+        throw new AppError(400, 'INVALID_CASHIER', 'Assigned cashier not found for this shop');
       }
     }
 
@@ -654,8 +718,9 @@ export const posCartService = {
           sessionId: session.id,
           insuranceCompanyId: insuranceCompany?.id ?? null,
           invId,
-          name: customer?.name ?? '',
-          phone: customer?.phone ?? null,
+          name: cart.isDelivery ? finalName : (customer?.name ?? ''),
+          phone: cart.isDelivery ? finalPhone : (customer?.phone ?? null),
+          address: cart.isDelivery ? finalAddress : null,
           date,
           subtotal: toMoneyString(totals.subtotal),
           discount: toMoneyString(totals.invoiceDiscountAmount),
@@ -669,6 +734,15 @@ export const posCartService = {
           insuranceAmount: toMoneyString(insuranceAmount),
           qty: totals.qty,
           type: 'pos',
+          fulfillmentChannel: cart.isDelivery ? 'delivery' : 'counter',
+          deliveryStatus: cart.isDelivery
+            ? cart.assignedCashierId
+              ? 'assigned'
+              : 'pending'
+            : null,
+          createdById: cart.isDelivery ? userId : null,
+          assignedCashierId: cart.isDelivery ? cart.assignedCashierId : null,
+          deliveryNote: cart.isDelivery ? cart.deliveryNote : null,
           medicines: snapshot as unknown as Prisma.InputJsonValue,
         },
       });

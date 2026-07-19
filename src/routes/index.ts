@@ -34,6 +34,7 @@ import { notificationsRouter } from './notifications.routes';
 import { reportsRouter } from './reports.routes';
 import { dashboardRouter } from './dashboard.routes';
 import { insuranceCompaniesRouter } from './insurance-companies.routes';
+import { deliveryRouter } from './delivery.routes';
 
 export const v1Router = Router();
 
@@ -74,3 +75,4 @@ v1Router.use('/languages', languagesRouter);
 v1Router.use('/notifications', notificationsRouter);
 v1Router.use('/dashboard', dashboardRouter);
 v1Router.use('/insurance-companies', insuranceCompaniesRouter);
+v1Router.use('/delivery/orders', deliveryRouter);
