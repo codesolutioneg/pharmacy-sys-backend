@@ -13,7 +13,6 @@
     "test:unit": "jest --runInBand --testPathPattern=tests/unit",
     "test:qa": "jest --runInBand --testPathPattern=tests/qa",
     "test:all": "jest --runInBand",
-    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",

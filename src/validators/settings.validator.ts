@@ -58,3 +58,12 @@ export const kvUpsertSchema = z.object({
   name: z.string().min(1),
   value: z.string().nullable(),
 });
+
+export const patchPosPrinterSchema = z
+  .object({
+    autoPrint: z.boolean().optional(),
+    preferredPrinter: z.string().max(255).nullable().optional(),
+    paperSize: z.enum(['A4', '80mm', '58mm']).optional(),
+    receiptFooter: z.string().max(500).nullable().optional(),
+  })
+  .strict();

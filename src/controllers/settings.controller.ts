@@ -40,4 +40,15 @@ export const settingsController = {
       await settingsService.upsertKv(req.user!.shopId, req.body.name, req.body.value),
     );
   },
+
+  async getPosPrinter(req: Request, res: Response) {
+    return sendSuccess(res, await settingsService.getPosPrinter(req.user!.shopId));
+  },
+
+  async patchPosPrinter(req: Request, res: Response) {
+    return sendSuccess(
+      res,
+      await settingsService.patchPosPrinter(req.user!.shopId, req.body),
+    );
+  },
 };

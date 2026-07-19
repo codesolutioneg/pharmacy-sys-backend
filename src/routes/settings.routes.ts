@@ -9,6 +9,7 @@ import {
   kvUpsertSchema,
   patchEmailSettingsSchema,
   patchGeneralSettingsSchema,
+  patchPosPrinterSchema,
 } from '../validators/settings.validator';
 
 export const settingsRouter = Router();
@@ -56,4 +57,17 @@ settingsRouter.put(
   authorize('setting.generalSetting'),
   validate(kvUpsertSchema),
   asyncHandler(settingsController.upsertKv),
+);
+
+/** POS printer prefs: any authenticated user can read (POS needs autoPrint); write requires settings perm. */
+settingsRouter.get(
+  '/pos-printer',
+  asyncHandler(settingsController.getPosPrinter),
+);
+
+settingsRouter.patch(
+  '/pos-printer',
+  authorize('setting.generalSetting'),
+  validate(patchPosPrinterSchema),
+  asyncHandler(settingsController.patchPosPrinter),
 );

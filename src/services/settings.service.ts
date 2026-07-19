@@ -193,4 +193,59 @@ export const settingsService = {
     });
     return { name: row.name, value: row.value };
   },
+
+  /** POS printer / receipt preferences (stored as settings KV `pos.printer`). */
+  async getPosPrinter(shopId: number) {
+    const row = await prisma.setting.findUnique({
+      where: { shopId_name: { shopId, name: 'pos.printer' } },
+    });
+    return parsePosPrinter(row?.value);
+  },
+
+  async patchPosPrinter(
+    shopId: number,
+    data: {
+      autoPrint?: boolean;
+      preferredPrinter?: string | null;
+      paperSize?: 'A4' | '80mm' | '58mm';
+      receiptFooter?: string | null;
+    },
+  ) {
+    const current = await this.getPosPrinter(shopId);
+    const next = {
+      autoPrint: data.autoPrint ?? current.autoPrint,
+      preferredPrinter:
+        data.preferredPrinter !== undefined ? data.preferredPrinter : current.preferredPrinter,
+      paperSize: data.paperSize ?? current.paperSize,
+      receiptFooter:
+        data.receiptFooter !== undefined ? data.receiptFooter : current.receiptFooter,
+    };
+    await this.upsertKv(shopId, 'pos.printer', JSON.stringify(next));
+    return next;
+  },
 };
+
+function parsePosPrinter(raw: string | null | undefined) {
+  const defaults = {
+    autoPrint: false,
+    preferredPrinter: null as string | null,
+    paperSize: 'A4' as 'A4' | '80mm' | '58mm',
+    receiptFooter: null as string | null,
+  };
+  if (!raw) return defaults;
+  try {
+    const parsed = JSON.parse(raw) as Partial<typeof defaults>;
+    return {
+      autoPrint: Boolean(parsed.autoPrint ?? defaults.autoPrint),
+      preferredPrinter:
+        typeof parsed.preferredPrinter === 'string' ? parsed.preferredPrinter : null,
+      paperSize:
+        parsed.paperSize === '80mm' || parsed.paperSize === '58mm' || parsed.paperSize === 'A4'
+          ? parsed.paperSize
+          : defaults.paperSize,
+      receiptFooter: typeof parsed.receiptFooter === 'string' ? parsed.receiptFooter : null,
+    };
+  } catch {
+    return defaults;
+  }
+}
