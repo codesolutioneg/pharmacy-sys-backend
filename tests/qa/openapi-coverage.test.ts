@@ -218,6 +218,8 @@ describe('QA OpenAPI coverage (all operations exercised)', () => {
           req = req.send({ terms: { hello: 'world' } });
         } else if (url.includes('/settings/kv')) {
           req = req.send({ key: 'qa_test', value: '1' });
+        } else if (url.includes('/settings/pos-printer')) {
+          req = req.send({ paperSize: 'A4', autoPrint: false });
         } else if (url.includes('/seen')) {
           req = req.send({});
         } else {

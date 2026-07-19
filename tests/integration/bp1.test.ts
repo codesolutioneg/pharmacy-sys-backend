@@ -111,6 +111,69 @@ describe('BP1 integration', () => {
       });
   });
 
+  it('gets and patches POS printer settings (KV pos.printer)', async () => {
+    const defaults = await request(app)
+      .get('/api/v1/settings/pos-printer')
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(defaults.status).toBe(200);
+    expect(defaults.body.data).toEqual({
+      autoPrint: false,
+      preferredPrinter: null,
+      paperSize: 'A4',
+      receiptFooter: null,
+    });
+
+    const patched = await request(app)
+      .patch('/api/v1/settings/pos-printer')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        autoPrint: true,
+        preferredPrinter: 'EPSON TM-T20',
+        paperSize: '80mm',
+        receiptFooter: 'Thank you — Al Noor Pharmacy',
+      });
+    expect(patched.status).toBe(200);
+    expect(patched.body.data).toEqual({
+      autoPrint: true,
+      preferredPrinter: 'EPSON TM-T20',
+      paperSize: '80mm',
+      receiptFooter: 'Thank you — Al Noor Pharmacy',
+    });
+
+    const again = await request(app)
+      .get('/api/v1/settings/pos-printer')
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(again.status).toBe(200);
+    expect(again.body.data.paperSize).toBe('80mm');
+    expect(again.body.data.autoPrint).toBe(true);
+
+    const partial = await request(app)
+      .patch('/api/v1/settings/pos-printer')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ paperSize: '58mm' });
+    expect(partial.status).toBe(200);
+    expect(partial.body.data.paperSize).toBe('58mm');
+    expect(partial.body.data.autoPrint).toBe(true);
+    expect(partial.body.data.preferredPrinter).toBe('EPSON TM-T20');
+
+    const bad = await request(app)
+      .patch('/api/v1/settings/pos-printer')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ paperSize: 'Letter' });
+    expect(bad.status).toBe(400);
+
+    // restore defaults for other suites
+    await request(app)
+      .patch('/api/v1/settings/pos-printer')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        autoPrint: false,
+        preferredPrinter: null,
+        paperSize: 'A4',
+        receiptFooter: null,
+      });
+  });
+
   it('creates role with sync permissions and lists users', async () => {
     const displayName = `Cashier BP1 ${Date.now()}`;
     const roleRes = await request(app)

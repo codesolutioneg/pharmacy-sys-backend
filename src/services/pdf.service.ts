@@ -1,11 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import PDFDocument from 'pdfkit';
-import bidiFactory from 'bidi-js';
 import { Prisma, Shop } from '@prisma/client';
-import { settingsService } from './settings.service';
-
-const bidi = bidiFactory();
 
 type InvoiceLine = {
   medicineId?: number;
@@ -16,13 +12,10 @@ type InvoiceLine = {
 };
 
 type InvoiceForPdf = {
-  shopId: number;
   invId: string;
   date: Date;
-  createdAt?: Date;
   name: string;
   phone: string | null;
-  address?: string | null;
   subtotal: Prisma.Decimal;
   discount: Prisma.Decimal;
   tax: Prisma.Decimal;
@@ -31,356 +24,364 @@ type InvoiceForPdf = {
   duePrice: Prisma.Decimal;
   returnedAmount: Prisma.Decimal;
   medicines: Prisma.JsonValue;
-  customer?: { name: string; phone: string; email?: string | null; address?: string | null } | null;
+  customer?: { name: string; phone: string; email: string } | null;
   method?: { name: string } | null;
 };
 
-type PaperSize = 'A4' | '80mm' | '58mm';
-
-const MM_TO_PT = 72 / 25.4;
-const FONT_REG = 'Receipt';
-const FONT_BOLD = 'Receipt-Bold';
-const ARABIC_REG = 'ReceiptAr';
-const ARABIC_BOLD = 'ReceiptAr-Bold';
-
-function money(value: Prisma.Decimal | number, symbol: string): string {
-  return `${Number(value).toFixed(2)} ${symbol}`;
-}
-
-function hasArabic(text: string): boolean {
-  return /[\u0600-\u06FF]/.test(text);
-}
-
-/**
- * Reorder logical Arabic for LTR PDF drawing. Keep Unicode letters as-is so
- * PDFKit/fontkit can shape/join them — do not run arabic-persian-reshaper.
- */
-function forPdfRtl(text: string): string {
-  if (!hasArabic(text)) return text;
-  const embedding = bidi.getEmbeddingLevels(text, 'rtl');
-  return bidi.getReorderedString(text, embedding);
-}
-
-function pageGeometry(paperSize: PaperSize): { size: [number, number] | 'A4'; margin: number; narrow: boolean } {
-  if (paperSize === '80mm') {
-    return { size: [80 * MM_TO_PT, 900], margin: 10, narrow: true };
-  }
-  if (paperSize === '58mm') {
-    return { size: [58 * MM_TO_PT, 900], margin: 8, narrow: true };
-  }
-  return { size: 'A4', margin: 40, narrow: false };
-}
-
-function formatInvoiceDate(date: Date, createdAt?: Date): string {
-  const d = createdAt ?? date;
-  const day = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  const time = (createdAt ?? date).toLocaleTimeString('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  });
-  return `${day} ${time}`;
-}
-
-function resolveFonts(): { latinReg?: string; latinBold?: string; arReg?: string; arBold?: string } {
-  const candidates = [
-    path.join(__dirname, '../../assets/fonts'),
-    path.join(process.cwd(), 'assets/fonts'),
-    path.join(process.cwd(), 'dist/../assets/fonts'),
-  ];
-  for (const dir of candidates) {
-    const arReg = path.join(dir, 'NotoSansArabic-Regular.ttf');
-    const arBold = path.join(dir, 'NotoSansArabic-Bold.ttf');
-    if (fs.existsSync(arReg) && fs.existsSync(arBold)) {
-      return { arReg, arBold };
-    }
-  }
-  return {};
-}
-
-function registerFonts(doc: PDFKit.PDFDocument) {
-  const fonts = resolveFonts();
-  // Built-in Latin (Helvetica) — crisp for EN thermal receipts.
-  doc.registerFont(FONT_REG, 'Helvetica');
-  doc.registerFont(FONT_BOLD, 'Helvetica-Bold');
-  if (fonts.arReg && fonts.arBold) {
-    doc.registerFont(ARABIC_REG, fonts.arReg);
-    doc.registerFont(ARABIC_BOLD, fonts.arBold);
-  }
-  return Boolean(fonts.arReg);
-}
-
 export type InvoicePdfOptions = {
-  paperSize?: PaperSize;
+  paperSize?: 'A4' | '80mm' | '58mm';
   receiptFooter?: string | null;
 };
 
+const FONT_REGULAR = 'NotoArabic';
+const FONT_BOLD = 'NotoArabicBold';
+const LATIN_REGULAR = 'Helvetica';
+const LATIN_BOLD = 'Helvetica-Bold';
+const ARABIC_RE = /[\u0600-\u06FF]/;
+
+/**
+ * PDFKit draws LTR. Fontkit shapes joined Arabic from logical char order within a word.
+ * Reverse word order (keep each word intact) so centered RTL phrases read correctly
+ * without arabic-persian-reshaper or bidi glyph scrambling.
+ */
+function prepareArabicForLtrCanvas(text: string): string {
+  if (!text || !ARABIC_RE.test(text)) return text;
+  // Keep whitespace/punctuation tokens; reverse the sequence for visual RTL.
+  return text
+    .split(/(\s+)/)
+    .filter((t) => t.length > 0)
+    .reverse()
+    .join('');
+}
+
+/** Prefer cwd (PM2), then relative to compiled dist/services → project root. */
+function resolveFont(fileName: string): string | null {
+  const candidates = [
+    path.join(process.cwd(), 'assets', 'fonts', fileName),
+    path.join(__dirname, '..', '..', 'assets', 'fonts', fileName),
+    path.join(__dirname, '..', 'assets', 'fonts', fileName),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function money(value: Prisma.Decimal | number): string {
+  return Number(value).toFixed(2);
+}
+
+function pageSizeFor(paperSize: 'A4' | '80mm' | '58mm'): 'A4' | [number, number] {
+  if (paperSize === '80mm') return [226.77, 1200];
+  if (paperSize === '58mm') return [164.41, 1200];
+  return 'A4';
+}
+
+function marginsFor(paperSize: 'A4' | '80mm' | '58mm'): number {
+  if (paperSize === 'A4') return 40;
+  if (paperSize === '58mm') return 8;
+  return 10;
+}
+
+function formatDate(date: Date): string {
+  const d = new Date(date);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function dashedLine(doc: PDFKit.PDFDocument, x: number, y: number, width: number): number {
+  doc
+    .save()
+    .strokeColor('#000000')
+    .lineWidth(0.6)
+    .dash(2.5, { space: 1.5 })
+    .moveTo(x, y)
+    .lineTo(x + width, y)
+    .stroke()
+    .undash()
+    .restore();
+  return y + 6;
+}
+
 export const pdfService = {
   /**
-   * Professional pharmacy receipt PDF (Laravel POS print.blade + cai_ thermal cues).
-   * Respects shop `pos.printer` KV: paperSize + receiptFooter. Returns raw PDF bytes.
+   * Laravel/CAI-style POS receipt PDF.
+   * Latin → Helvetica. Arabic → Noto Sans Arabic with logical Unicode as-is
+   * (PDFKit/fontkit shapes joined forms). No arabic-persian-reshaper / bidi-js.
    */
   async renderInvoicePdf(
     invoice: InvoiceForPdf,
     shop: Shop,
-    options?: InvoicePdfOptions,
+    options: InvoicePdfOptions = {},
   ): Promise<Buffer> {
-    const printer = options
-      ? {
-          paperSize: options.paperSize ?? 'A4',
-          receiptFooter: options.receiptFooter ?? null,
-        }
-      : await settingsService.getPosPrinter(invoice.shopId);
-    const paperSize = (printer.paperSize ?? 'A4') as PaperSize;
-    const footer = printer.receiptFooter?.trim() || null;
-    const { size, margin, narrow } = pageGeometry(paperSize);
-    const symbol = shop.currencySymbol?.trim() || shop.currency || 'EGP';
+    const paperSize = options.paperSize ?? 'A4';
+    const receiptFooter = options.receiptFooter?.trim().replace(/[—–]/g, '-') || null;
+    const margin = marginsFor(paperSize);
+    const size = pageSizeFor(paperSize);
+    const isThermal = paperSize === '80mm' || paperSize === '58mm';
+    const isNarrow = paperSize === '58mm';
+
+    const regularFont = resolveFont('NotoSansArabic-Regular.ttf');
+    const boldFont = resolveFont('NotoSansArabic-Bold.ttf');
 
     return new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({
         margin,
         size,
         autoFirstPage: true,
-        info: {
-          Title: `Invoice ${invoice.invId}`,
-          Author: shop.name,
-        },
+        bufferPages: true,
       });
       const chunks: Buffer[] = [];
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', (err: Error) => reject(err));
 
-      const hasArFont = registerFonts(doc);
-      const pageW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-      const left = doc.page.margins.left;
-      const right = left + pageW;
+      if (regularFont) doc.registerFont(FONT_REGULAR, regularFont);
+      if (boldFont) doc.registerFont(FONT_BOLD, boldFont);
 
-      const fontSize = {
-        shop: narrow ? 13 : 18,
-        meta: narrow ? 8 : 10,
-        body: narrow ? 8 : 10,
-        title: narrow ? 11 : 14,
-        total: narrow ? 10 : 12,
-        tiny: narrow ? 7 : 9,
-      };
+      const hasArabicFonts = Boolean(regularFont);
+      const arabicRegular = hasArabicFonts ? FONT_REGULAR : LATIN_REGULAR;
+      const arabicBold =
+        hasArabicFonts && boldFont ? FONT_BOLD : hasArabicFonts ? FONT_REGULAR : LATIN_BOLD;
 
-      const setLatin = (bold = false) => doc.font(bold ? FONT_BOLD : FONT_REG);
-      const setArabic = (bold = false) => {
-        if (hasArFont) doc.font(bold ? ARABIC_BOLD : ARABIC_REG);
-        else setLatin(bold);
+      const contentWidth = doc.page.width - margin * 2;
+      const left = margin;
+
+      const titleSize = isNarrow ? 11 : isThermal ? 13 : 18;
+      const arTitleSize = isNarrow ? 10 : isThermal ? 11 : 14;
+      const metaSize = isNarrow ? 7.5 : isThermal ? 8.5 : 10;
+      const tableSize = isNarrow ? 7 : isThermal ? 8 : 9.5;
+      const totalSize = isNarrow ? 9 : isThermal ? 10 : 12;
+
+      let y = margin;
+
+      const pickFont = (text: string, bold: boolean) => {
+        if (ARABIC_RE.test(text) && hasArabicFonts) {
+          return bold ? arabicBold : arabicRegular;
+        }
+        return bold ? LATIN_BOLD : LATIN_REGULAR;
       };
 
       const drawText = (
         text: string,
-        opts: PDFKit.Mixins.TextOptions & { bold?: boolean; size?: number; color?: string } = {},
+        x: number,
+        atY: number,
+        opts: { width: number; align?: 'left' | 'center' | 'right'; bold?: boolean; size?: number },
       ) => {
-        const { bold = false, size = fontSize.body, color = '#111111', ...rest } = opts;
-        const y = doc.y;
-        doc.fillColor(color).fontSize(size);
-        const content = hasArabic(text) && hasArFont ? forPdfRtl(text) : text;
-        if (hasArabic(text) && hasArFont) setArabic(bold);
-        else setLatin(bold);
-        doc.text(content, left, y, {
-          width: pageW,
-          lineGap: 1,
-          ...rest,
-        });
+        const display = ARABIC_RE.test(text) ? prepareArabicForLtrCanvas(text) : text;
+        doc
+          .font(pickFont(text, Boolean(opts.bold)))
+          .fontSize(opts.size ?? metaSize)
+          .fillColor('#000000')
+          .text(display, x, atY, {
+            width: opts.width,
+            align: opts.align ?? 'left',
+            lineGap: 1,
+          });
       };
 
-      const hr = (style: 'solid' | 'dashed' = 'dashed') => {
-        const y = doc.y + 2;
-        doc.save();
-        doc.strokeColor('#222222').lineWidth(0.7);
-        if (style === 'dashed') doc.dash(3, { space: 2 });
-        else doc.undash();
-        doc.moveTo(left, y).lineTo(right, y).stroke();
-        doc.undash();
-        doc.restore();
-        doc.x = left;
-        doc.y = y + 6;
-      };
+      // ——— Header ———
+      drawText(shop.name || 'Pharmacy', left, y, {
+        width: contentWidth,
+        align: 'center',
+        bold: true,
+        size: titleSize,
+      });
+      y = doc.y + (isThermal ? 1 : 2);
 
-      const metaRow = (label: string, value: string) => {
-        const y = doc.y;
-        const labelW = pageW * 0.34;
-        setLatin(true);
-        doc.fillColor('#111').fontSize(fontSize.meta);
-        doc.text(label, left, y, { width: labelW, lineBreak: false });
-        setLatin(false);
-        const valueText = hasArabic(value) && hasArFont ? forPdfRtl(value) : value;
-        if (hasArabic(value) && hasArFont) setArabic(false);
-        doc.fontSize(fontSize.meta).text(valueText, left + labelW, y, {
-          width: pageW - labelW,
-          align: 'left',
-        });
-        doc.x = left;
-        doc.y = y + fontSize.meta + 5;
-      };
-
-      const amountRow = (label: string, value: string, opts?: { bold?: boolean; box?: boolean }) => {
-        const pad = opts?.box ? 4 : 0;
-        const rowH = (opts?.box ? fontSize.total : fontSize.body) + 8;
-        const y = doc.y;
-        if (opts?.box) {
-          doc.save();
-          doc.rect(left, y - 1, pageW, rowH).fill('#111111');
-          doc.restore();
-          doc.fillColor('#FFFFFF');
-        } else {
-          doc.fillColor('#111111');
-        }
-        setLatin(Boolean(opts?.bold || opts?.box));
-        doc.fontSize(opts?.box ? fontSize.total : fontSize.body);
-        const labelW = pageW * 0.58;
-        doc.text(label, left + pad, y + 2, { width: labelW - pad, lineBreak: false });
-        doc.text(value, left + labelW, y + 2, {
-          width: pageW - labelW - pad,
-          align: 'right',
-          lineBreak: false,
-        });
-        doc.fillColor('#111111');
-        doc.x = left;
-        doc.y = y + rowH + 2;
-      };
-
-      // ── Header (centered, Laravel-style) ─────────────────────────────
-      drawText(shop.name, { bold: true, size: fontSize.shop, align: 'center', width: pageW });
       if (shop.nameAr) {
-        drawText(shop.nameAr, { bold: true, size: fontSize.title, align: 'center', width: pageW });
-      }
-      if (shop.address) {
-        drawText(shop.address, { size: fontSize.tiny, align: 'center', width: pageW, color: '#444444' });
-      }
-      const contactBits = [
-        shop.phone ? `Tel: ${shop.phone}` : null,
-        shop.email ? `Email: ${shop.email}` : null,
-      ].filter(Boolean) as string[];
-      if (contactBits.length) {
-        drawText(contactBits.join('  ·  '), {
-          size: fontSize.tiny,
+        drawText(shop.nameAr, left, y, {
+          width: contentWidth,
           align: 'center',
-          width: pageW,
-          color: '#444444',
+          bold: true,
+          size: arTitleSize,
         });
+        y = doc.y + 1;
       }
 
-      hr('solid');
+      const contactBits: string[] = [];
+      if (shop.address) contactBits.push(shop.address);
+      if (shop.phone) contactBits.push(shop.phone);
+      if (shop.email) contactBits.push(shop.email);
+      if (contactBits.length) {
+        doc
+          .font(LATIN_REGULAR)
+          .fontSize(metaSize - 0.5)
+          .fillColor('#333333')
+          .text(contactBits.join('  |  '), left, y, { width: contentWidth, align: 'center' });
+        y = doc.y + 2;
+      }
 
-      // ── Meta ────────────────────────────────────────────────────────
-      metaRow('Date:', formatInvoiceDate(new Date(invoice.date), invoice.createdAt ? new Date(invoice.createdAt) : undefined));
-      metaRow('Invoice ID:', invoice.invId);
+      y = dashedLine(doc, left, y + 2, contentWidth);
 
-      const customerName = invoice.customer?.name || invoice.name || 'Walking Customer';
-      metaRow('Customer:', customerName);
-      const phone = invoice.customer?.phone || invoice.phone;
-      if (phone) metaRow('Phone:', phone);
-      const address = invoice.customer?.address || invoice.address;
-      if (address) metaRow('Address:', address);
+      // ——— Meta ———
+      const customerName = invoice.customer?.name || invoice.name || 'Walk-in';
+      const customerPhone = invoice.customer?.phone || invoice.phone || null;
 
-      hr();
+      const metaRows: Array<[string, string]> = [
+        ['Invoice', invoice.invId],
+        ['Date', formatDate(invoice.date)],
+        ['Customer', customerName],
+      ];
+      if (customerPhone) metaRows.push(['Phone', customerPhone]);
 
-      drawText('INVOICE', { bold: true, size: fontSize.title, align: 'center', width: pageW });
-      doc.moveDown(0.3);
-      hr('solid');
+      for (const [label, value] of metaRows) {
+        const rowY = y;
+        const labelText = `${label}: `;
+        doc.font(LATIN_BOLD).fontSize(metaSize).fillColor('#000000');
+        const labelWidth = doc.widthOfString(labelText);
+        doc.text(labelText, left, rowY, { lineBreak: false });
+        drawText(value, left + labelWidth, rowY, {
+          width: Math.max(20, contentWidth - labelWidth),
+          align: ARABIC_RE.test(value) ? 'right' : 'left',
+          size: metaSize,
+          bold: ARABIC_RE.test(value),
+        });
+        y = Math.max(doc.y, rowY + metaSize) + (isThermal ? 1 : 2);
+      }
 
-      // ── Column headers ──────────────────────────────────────────────
-      const cols = narrow
-        ? { idx: 0.1, name: 0.42, qty: 0.12, price: 0.18, total: 0.18 }
-        : { idx: 0.08, name: 0.44, qty: 0.12, price: 0.18, total: 0.18 };
+      y = dashedLine(doc, left, y + 3, contentWidth);
 
-      const headerY = doc.y;
-      setLatin(true);
-      doc.fillColor('#111').fontSize(fontSize.meta);
-      let x = left;
-      doc.text('#', x, headerY, { width: pageW * cols.idx, align: 'center', lineBreak: false });
-      x += pageW * cols.idx;
-      doc.text('Name', x, headerY, { width: pageW * cols.name, lineBreak: false });
-      x += pageW * cols.name;
-      doc.text('Qty', x, headerY, { width: pageW * cols.qty, align: 'center', lineBreak: false });
-      x += pageW * cols.qty;
-      doc.text('Price', x, headerY, { width: pageW * cols.price, align: 'right', lineBreak: false });
-      x += pageW * cols.price;
-      doc.text('Total', x, headerY, { width: pageW * cols.total, align: 'right', lineBreak: false });
-      doc.x = left;
-      doc.y = headerY + fontSize.meta + 3;
-      hr();
+      // ——— Items table ———
+      const colHash = isNarrow ? 12 : isThermal ? 14 : 22;
+      const colQty = isNarrow ? 20 : isThermal ? 24 : 36;
+      const colPrice = isNarrow ? 32 : isThermal ? 40 : 60;
+      const colTotal = isNarrow ? 34 : isThermal ? 44 : 66;
+      const colName = Math.max(36, contentWidth - colHash - colQty - colPrice - colTotal);
 
-      // ── Lines ───────────────────────────────────────────────────────
+      const headerY = y;
+      doc.font(LATIN_BOLD).fontSize(tableSize).fillColor('#000000');
+      doc.text('#', left, headerY, { width: colHash, align: 'left' });
+      doc.text('Name', left + colHash, headerY, { width: colName, align: 'left' });
+      doc.text('Qty', left + colHash + colName, headerY, { width: colQty, align: 'right' });
+      doc.text('Price', left + colHash + colName + colQty, headerY, { width: colPrice, align: 'right' });
+      doc.text('Total', left + colHash + colName + colQty + colPrice, headerY, {
+        width: colTotal,
+        align: 'right',
+      });
+      y = headerY + tableSize + 3;
+
+      doc
+        .save()
+        .strokeColor('#000000')
+        .lineWidth(0.8)
+        .moveTo(left, y)
+        .lineTo(left + contentWidth, y)
+        .stroke()
+        .restore();
+      y += 4;
+
       const lines = Array.isArray(invoice.medicines) ? (invoice.medicines as InvoiceLine[]) : [];
-      lines.forEach((line, i) => {
-        const label = line.name ?? `Medicine #${line.medicineId ?? ''}`;
+      lines.forEach((line, index) => {
+        const label = (line.name ?? `Medicine #${line.medicineId ?? ''}`).toString();
         const qty = line.origQty ?? 0;
-        const unitPrice = Number(line.unitPrice ?? 0).toFixed(2);
-        const lineTotal = Number(line.origLineTotal ?? 0).toFixed(2);
-        const y = doc.y;
-        setLatin(false);
-        doc.fillColor('#111').fontSize(fontSize.body);
-        let cx = left;
-        doc.text(String(i + 1), cx, y, { width: pageW * cols.idx, align: 'center', lineBreak: false });
-        cx += pageW * cols.idx;
-        const nameH = doc.heightOfString(label, { width: pageW * cols.name });
-        doc.text(label, cx, y, { width: pageW * cols.name });
-        cx += pageW * cols.name;
-        doc.text(String(qty), cx, y, { width: pageW * cols.qty, align: 'center', lineBreak: false });
-        cx += pageW * cols.qty;
-        doc.text(unitPrice, cx, y, { width: pageW * cols.price, align: 'right', lineBreak: false });
-        cx += pageW * cols.price;
-        doc.text(lineTotal, cx, y, { width: pageW * cols.total, align: 'right', lineBreak: false });
-        doc.x = left;
-        doc.y = y + Math.max(nameH, fontSize.body) + 3;
+        const unitPrice = money(line.unitPrice ?? 0);
+        const lineTotal = money(line.origLineTotal ?? 0);
+        const rowTop = y;
+
+        doc.font(LATIN_REGULAR).fontSize(tableSize).fillColor('#000000');
+        doc.text(String(index + 1), left, rowTop, { width: colHash, align: 'left' });
+        drawText(label, left + colHash, rowTop, {
+          width: colName,
+          align: ARABIC_RE.test(label) ? 'right' : 'left',
+          size: tableSize,
+        });
+        const nameBottom = doc.y;
+        doc.font(LATIN_REGULAR).fontSize(tableSize);
+        doc.text(String(qty), left + colHash + colName, rowTop, { width: colQty, align: 'right' });
+        doc.text(unitPrice, left + colHash + colName + colQty, rowTop, {
+          width: colPrice,
+          align: 'right',
+        });
+        doc.text(lineTotal, left + colHash + colName + colQty + colPrice, rowTop, {
+          width: colTotal,
+          align: 'right',
+        });
+        y = Math.max(nameBottom, rowTop + tableSize + 2) + (isThermal ? 1 : 2);
       });
 
       if (lines.length === 0) {
-        drawText('No items', { size: fontSize.meta, align: 'center', width: pageW, color: '#666' });
+        doc
+          .font(LATIN_REGULAR)
+          .fontSize(tableSize)
+          .text('No items', left, y, { width: contentWidth, align: 'center' });
+        y = doc.y + 4;
       }
 
-      hr('solid');
+      y = dashedLine(doc, left, y + 2, contentWidth);
 
-      // ── Totals (Laravel stack + cai_ TOTAL bar) ─────────────────────
-      amountRow('Sub Total:', money(invoice.subtotal, symbol));
-      amountRow('Discount:', money(invoice.discount, symbol));
-      amountRow('Tax:', money(invoice.tax, symbol));
-      amountRow('Grand Total:', money(invoice.totalPrice, symbol), { bold: true, box: true });
-      amountRow('Due:', money(invoice.duePrice, symbol));
-
-      hr();
-
-      // ── Payments ────────────────────────────────────────────────────
-      drawText('Payment Details', { bold: true, size: fontSize.meta, width: pageW });
-      doc.moveDown(0.2);
-      amountRow('Payment Method:', invoice.method?.name || 'Cash');
-      amountRow('Total Amount:', money(invoice.totalPrice, symbol));
-      amountRow('Received:', money(invoice.paidAmount, symbol));
-      amountRow('Change / Returned:', money(invoice.returnedAmount, symbol));
-
-      hr();
-
-      // ── Footer ──────────────────────────────────────────────────────
-      drawText('Thank you for choosing us!', {
-        bold: true,
-        size: fontSize.meta,
-        align: 'center',
-        width: pageW,
-      });
-
-      if (footer) {
-        doc.moveDown(0.25);
-        drawText(footer, {
-          size: fontSize.body,
-          align: 'center',
-          width: pageW,
-          color: '#333333',
+      const drawTotalRow = (label: string, value: string) => {
+        doc
+          .font(LATIN_REGULAR)
+          .fontSize(metaSize)
+          .fillColor('#000000')
+          .text(label, left, y, { width: contentWidth * 0.55, align: 'left' });
+        doc.text(value, left + contentWidth * 0.55, y, {
+          width: contentWidth * 0.45,
+          align: 'right',
         });
+        y += metaSize + (isThermal ? 3 : 4);
+      };
+
+      drawTotalRow('Subtotal', money(invoice.subtotal));
+      drawTotalRow('Discount', money(invoice.discount));
+      drawTotalRow('Tax', money(invoice.tax));
+
+      // ——— Grand Total black bar ———
+      const barH = isThermal ? 18 : 22;
+      const barPad = 4;
+      doc.save().rect(left, y, contentWidth, barH).fill('#000000').restore();
+      doc
+        .font(LATIN_BOLD)
+        .fontSize(totalSize)
+        .fillColor('#FFFFFF')
+        .text('Grand Total', left + barPad, y + (barH - totalSize) / 2 - 1, {
+          width: contentWidth * 0.5 - barPad,
+          align: 'left',
+        });
+      doc.text(money(invoice.totalPrice), left + contentWidth * 0.45, y + (barH - totalSize) / 2 - 1, {
+        width: contentWidth * 0.55 - barPad,
+        align: 'right',
+      });
+      y += barH + 6;
+
+      y = dashedLine(doc, left, y, contentWidth);
+      drawTotalRow('Paid', money(invoice.paidAmount));
+      drawTotalRow('Due', money(invoice.duePrice));
+      drawTotalRow('Change', money(invoice.returnedAmount));
+      if (invoice.method?.name) {
+        drawTotalRow('Payment', invoice.method.name);
       }
 
-      doc.moveDown(0.35);
-      drawText(`Currency: ${shop.currency || 'EGP'}`, {
-        size: fontSize.tiny,
+      y = dashedLine(doc, left, y + 2, contentWidth);
+
+      drawText('Thank you for your purchase', left, y, {
+        width: contentWidth,
         align: 'center',
-        width: pageW,
-        color: '#666666',
+        bold: true,
+        size: metaSize,
       });
+      y = doc.y + 3;
+
+      if (receiptFooter) {
+        drawText(receiptFooter, left, y, {
+          width: contentWidth,
+          align: 'center',
+          size: metaSize,
+        });
+        y = doc.y + 2;
+      }
+
+      doc
+        .font(LATIN_REGULAR)
+        .fontSize(metaSize - 1)
+        .fillColor('#666666')
+        .text('Powered by Pharmacy Sys', left, y + 4, {
+          width: contentWidth,
+          align: 'center',
+        });
 
       doc.end();
     });

@@ -5,6 +5,7 @@ import { add, round2, sub, toDecimal, toMoneyString } from '../utils/money';
 import { ledgerService } from './ledger.service';
 import { pdfService } from './pdf.service';
 import { mailService } from './mail.service';
+import { settingsService } from './settings.service';
 
 type InvoiceLineSnapshot = {
   medicineId: number;
@@ -75,7 +76,11 @@ export const invoicesService = {
     if (!shop) {
       throw new AppError(404, 'SHOP_NOT_FOUND', 'Shop not found');
     }
-    return pdfService.renderInvoicePdf(invoice, shop);
+    const posPrinter = await settingsService.getPosPrinter(shopId);
+    return pdfService.renderInvoicePdf(invoice, shop, {
+      paperSize: posPrinter.paperSize,
+      receiptFooter: posPrinter.receiptFooter,
+    });
   },
 
   async sendEmail(shopId: number, id: number, to?: string) {
@@ -92,7 +97,11 @@ export const invoicesService = {
         'No recipient email available — provide `to` or set an email on the invoice customer',
       );
     }
-    const pdfBuffer = await pdfService.renderInvoicePdf(invoice, shop);
+    const posPrinter = await settingsService.getPosPrinter(shopId);
+    const pdfBuffer = await pdfService.renderInvoicePdf(invoice, shop, {
+      paperSize: posPrinter.paperSize,
+      receiptFooter: posPrinter.receiptFooter,
+    });
     await mailService.sendMail({
       to: recipient,
       subject: `Invoice ${invoice.invId}`,

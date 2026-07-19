@@ -21,6 +21,8 @@ info:
     (personal inbox, auth-only), and Languages (i18n catalog with mergeable
     per-language terms).
 servers:
+  - url: https://api.demo.pharmacy.code-solution.org
+    description: Production
   - url: http://localhost:3000
     description: Local
 paths:
@@ -242,6 +244,53 @@ paths:
       summary: Upsert KV setting
       responses:
         "200": { description: Saved }
+  /api/v1/settings/pos-printer:
+    get:
+      tags: [Settings]
+      security: [{ bearerAuth: [] }]
+      summary: POS printer / receipt preferences (any authenticated user)
+      description: >
+        Stored as settings KV name `pos.printer` (JSON). Defaults when unset:
+        autoPrint=false, preferredPrinter=null, paperSize=A4, receiptFooter=null.
+      responses:
+        "200":
+          description: POS printer settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    $ref: '#/components/schemas/PosPrinterSettings'
+    patch:
+      tags: [Settings]
+      security: [{ bearerAuth: [] }]
+      summary: Update POS printer preferences (requires setting.generalSetting)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                autoPrint: { type: boolean }
+                preferredPrinter: { type: string, nullable: true, maxLength: 255 }
+                paperSize: { type: string, enum: [A4, '80mm', '58mm'] }
+                receiptFooter: { type: string, nullable: true, maxLength: 500 }
+      responses:
+        "200":
+          description: Updated POS printer settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    $ref: '#/components/schemas/PosPrinterSettings'
+        "403": { description: Missing setting.generalSetting }
   /api/v1/payment-methods:
     get:
       tags: [PaymentMethods]
@@ -2139,6 +2188,15 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  schemas:
+    PosPrinterSettings:
+      type: object
+      required: [autoPrint, preferredPrinter, paperSize, receiptFooter]
+      properties:
+        autoPrint: { type: boolean }
+        preferredPrinter: { type: string, nullable: true }
+        paperSize: { type: string, enum: [A4, '80mm', '58mm'] }
+        receiptFooter: { type: string, nullable: true }
 tags:
   - name: Auth
   - name: Users
