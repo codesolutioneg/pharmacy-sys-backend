@@ -134,6 +134,35 @@ describe('tax formulas', () => {
   });
 });
 
+describe('insurance checkout paid defaults', () => {
+  it('zero paid → settle full patient share (due 0)', () => {
+    const grandTotal = 65;
+    const insurancePercent = 75;
+    const insuranceAmount = pct(grandTotal, insurancePercent);
+    const patientAmount = sub(grandTotal, insuranceAmount);
+    const enteredPaid = 0;
+    const paid =
+      enteredPaid <= 0 || enteredPaid >= grandTotal || enteredPaid >= Number(patientAmount)
+          ? patientAmount
+          : round2(enteredPaid);
+    const due = sub(patientAmount, paid);
+    expect(insuranceAmount.toFixed(2)).toBe('48.75');
+    expect(patientAmount.toFixed(2)).toBe('16.25');
+    expect(paid.toFixed(2)).toBe('16.25');
+    expect(due.toFixed(2)).toBe('0.00');
+  });
+
+  it('paid full grandTotal → still only patient share recorded as paid', () => {
+    const grandTotal = 75;
+    const insuranceAmount = pct(grandTotal, 50);
+    const patient = sub(grandTotal, insuranceAmount);
+    const enteredPaid = 75;
+    const paid = enteredPaid >= Number(patient) ? patient : round2(enteredPaid);
+    expect(patient.toFixed(2)).toBe('37.50');
+    expect(paid.toFixed(2)).toBe('37.50');
+  });
+});
+
 describe('session cash reconciliation formula', () => {
   it('expectedCash = openingFloat + cashPays - cashReturns', () => {
     const openingFloat = 100;

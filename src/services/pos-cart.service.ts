@@ -570,11 +570,27 @@ export const posCartService = {
 
       insuranceAmount = pct(totals.grandTotal, insurancePercent);
       patientAmount = sub(totals.grandTotal, insuranceAmount);
-      paid = Decimal.min(totals.paid, patientAmount);
-      due = sub(patientAmount, paid);
-      change = totals.paid.greaterThan(patientAmount)
-        ? sub(totals.paid, patientAmount)
-        : toDecimal(0);
+
+      // Treat "full total" payment intent as covering the patient co-pay.
+      // Empty/zero paid → settle patient share in full at the counter (no patient due),
+      // matching cashier expectation that insurance covers the rest.
+      if (
+        totals.paid.lessThanOrEqualTo(0) ||
+        totals.paid.greaterThanOrEqualTo(totals.grandTotal) ||
+        totals.paid.greaterThanOrEqualTo(patientAmount)
+      ) {
+        paid = patientAmount;
+        due = toDecimal(0);
+        // Overpay on co-pay only (paid between patientAmount and grandTotal)
+        change =
+          totals.paid.greaterThan(patientAmount) && totals.paid.lessThan(totals.grandTotal)
+            ? sub(totals.paid, patientAmount)
+            : toDecimal(0);
+      } else {
+        paid = totals.paid;
+        due = sub(patientAmount, paid);
+        change = toDecimal(0);
+      }
     }
 
     if (due.greaterThan(0) && !cart.customerId) {

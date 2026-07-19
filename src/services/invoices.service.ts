@@ -45,7 +45,17 @@ export const invoicesService = {
       ...(params.customerId ? { customerId: params.customerId } : {}),
     };
     const [items, total] = await Promise.all([
-      prisma.invoice.findMany({ where, orderBy: { id: 'desc' }, skip, take: params.limit }),
+      prisma.invoice.findMany({
+        where,
+        orderBy: { id: 'desc' },
+        skip,
+        take: params.limit,
+        include: {
+          customer: { select: { id: true, name: true } },
+          method: { select: { id: true, name: true, isInsurance: true } },
+          insuranceCompany: { select: { id: true, name: true, nameAr: true } },
+        },
+      }),
       prisma.invoice.count({ where }),
     ]);
     return { items, meta: { page: params.page, limit: params.limit, total } };
@@ -62,7 +72,14 @@ export const invoicesService = {
   async getById(shopId: number, id: number) {
     const invoice = await prisma.invoice.findFirst({
       where: { id, shopId },
-      include: { customer: true, method: true, pays: true, saleReturns: true },
+      include: {
+        customer: true,
+        method: true,
+        pays: { include: { method: { select: { id: true, name: true } } } },
+        saleReturns: true,
+        insuranceCompany: true,
+        session: { select: { id: true, status: true, openedAt: true } },
+      },
     });
     if (!invoice) {
       throw new AppError(404, 'INVOICE_NOT_FOUND', 'Invoice not found');

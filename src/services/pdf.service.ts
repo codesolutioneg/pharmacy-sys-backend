@@ -19,13 +19,17 @@ type InvoiceForPdf = {
   subtotal: Prisma.Decimal;
   discount: Prisma.Decimal;
   tax: Prisma.Decimal;
+  taxRatePercent?: Prisma.Decimal;
   totalPrice: Prisma.Decimal;
   paidAmount: Prisma.Decimal;
   duePrice: Prisma.Decimal;
   returnedAmount: Prisma.Decimal;
+  insurancePercent?: Prisma.Decimal;
+  insuranceAmount?: Prisma.Decimal;
   medicines: Prisma.JsonValue;
   customer?: { name: string; phone: string; email: string } | null;
   method?: { name: string } | null;
+  insuranceCompany?: { name: string; nameAr: string | null } | null;
 };
 
 export type InvoicePdfOptions = {
@@ -348,11 +352,28 @@ export const pdfService = {
       y += barH + 6;
 
       y = dashedLine(doc, left, y, contentWidth);
-      drawTotalRow('Paid', money(invoice.paidAmount));
-      drawTotalRow('Due', money(invoice.duePrice));
+      drawTotalRow('Paid (patient)', money(invoice.paidAmount));
+      drawTotalRow('Due (patient)', money(invoice.duePrice));
       drawTotalRow('Change', money(invoice.returnedAmount));
       if (invoice.method?.name) {
         drawTotalRow('Payment', invoice.method.name);
+      }
+
+      const insAmount = invoice.insuranceAmount ? Number(invoice.insuranceAmount) : 0;
+      if (insAmount > 0) {
+        y = dashedLine(doc, left, y + 2, contentWidth);
+        const coName =
+          invoice.insuranceCompany?.nameAr ||
+          invoice.insuranceCompany?.name ||
+          'Insurance';
+        drawTotalRow('Insurance co.', coName);
+        drawTotalRow(
+          'Insurance %',
+          `${Number(invoice.insurancePercent ?? 0).toFixed(0)}%`,
+        );
+        drawTotalRow('Insurance covers', money(invoice.insuranceAmount!));
+        const patientShare = Number(invoice.totalPrice) - insAmount;
+        drawTotalRow('Patient share', money(patientShare));
       }
 
       y = dashedLine(doc, left, y + 2, contentWidth);
