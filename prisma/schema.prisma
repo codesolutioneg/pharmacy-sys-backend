@@ -55,6 +55,11 @@ enum LedgerInvoiceType {
   purchase_return
 }
 
+enum SessionStatus {
+  open
+  closed
+}
+
 model Shop {
   id                  Int      @id @default(autoincrement())
   name                String
@@ -89,26 +94,28 @@ model Shop {
   customers         Customer[]
   suppliers         Supplier[]
   vendors           Vendor[]
-  paymentMethods    PaymentMethod[]
-  productCategories ProductCategory[]
-  medicineTypes     MedicineType[]
-  units             Unit[]
-  leaves            Leaf[]
-  medicines         Medicine[]
-  batches           Batch[]
-  purchases         Purchase[]
-  purchasePays      PurchasePay[]
-  purchaseReturns   PurchaseReturn[]
-  invoices          Invoice[]
-  invoicePays       InvoicePay[]
-  saleReturns       SaleReturn[]
-  expenseCategories ExpenseCategory[]
-  expenses          PharmacyExpense[]
-  prescriptions     Prescription[]
-  notifications     Notification[]
-  languages         Language[]
-  posCarts          PosCart[]
-  purchaseDrafts    PurchaseDraft[]
+  paymentMethods     PaymentMethod[]
+  productCategories  ProductCategory[]
+  medicineTypes      MedicineType[]
+  units              Unit[]
+  leaves             Leaf[]
+  medicines          Medicine[]
+  batches            Batch[]
+  purchases          Purchase[]
+  purchasePays       PurchasePay[]
+  purchaseReturns    PurchaseReturn[]
+  invoices           Invoice[]
+  invoicePays        InvoicePay[]
+  saleReturns        SaleReturn[]
+  expenseCategories  ExpenseCategory[]
+  expenses           PharmacyExpense[]
+  prescriptions      Prescription[]
+  notifications      Notification[]
+  languages          Language[]
+  posCarts           PosCart[]
+  purchaseDrafts     PurchaseDraft[]
+  posSessions        PosSession[]
+  insuranceCompanies InsuranceCompany[]
 
   @@map("shops")
 }
@@ -167,6 +174,7 @@ model User {
   shop          Shop           @relation(fields: [shopId], references: [id])
   role          Role           @relation(fields: [roleId], references: [id])
   refreshTokens RefreshToken[]
+  posSessions   PosSession[]
 
   @@index([shopId])
   @@index([roleId])
@@ -275,12 +283,13 @@ model Vendor {
 }
 
 model PaymentMethod {
-  id        Int      @id @default(autoincrement())
-  shopId    Int      @map("shop_id")
-  name      String
-  balance   Decimal  @default(0) @db.Decimal(20, 2)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          Int      @id @default(autoincrement())
+  shopId      Int      @map("shop_id")
+  name        String
+  balance     Decimal  @default(0) @db.Decimal(20, 2)
+  isInsurance Boolean  @default(false) @map("is_insurance")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   shop         Shop          @relation(fields: [shopId], references: [id])
   purchases    Purchase[]
@@ -291,6 +300,52 @@ model PaymentMethod {
   @@unique([shopId, name])
   @@index([shopId])
   @@map("payment_methods")
+}
+
+model InsuranceCompany {
+  id                      Int          @id @default(autoincrement())
+  shopId                  Int          @map("shop_id")
+  name                    String
+  nameAr                  String?      @map("name_ar")
+  phone                   String?
+  address                 String?
+  defaultDiscountPercent  Decimal      @default(0) @map("default_discount_percent") @db.Decimal(5, 2)
+  due                     Decimal      @default(0) @db.Decimal(20, 2)
+  status                  ActiveStatus @default(active)
+  createdAt               DateTime     @default(now()) @map("created_at")
+  updatedAt               DateTime     @updatedAt @map("updated_at")
+
+  shop     Shop      @relation(fields: [shopId], references: [id])
+  invoices Invoice[]
+  posCarts PosCart[]
+
+  @@unique([shopId, name])
+  @@index([shopId])
+  @@map("insurance_companies")
+}
+
+model PosSession {
+  id           Int           @id @default(autoincrement())
+  shopId       Int           @map("shop_id")
+  userId       Int           @map("user_id")
+  status       SessionStatus @default(open)
+  openingFloat Decimal       @default(0) @map("opening_float") @db.Decimal(20, 2)
+  openedAt     DateTime      @default(now()) @map("opened_at")
+  closedAt     DateTime?     @map("closed_at")
+  countedCash  Decimal?      @map("counted_cash") @db.Decimal(20, 2)
+  expectedCash Decimal?      @map("expected_cash") @db.Decimal(20, 2)
+  difference   Decimal?      @db.Decimal(20, 2)
+  note         String?
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  shop     Shop      @relation(fields: [shopId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+  invoices Invoice[]
+
+  @@index([shopId, userId])
+  @@index([shopId, status])
+  @@map("pos_sessions")
 }
 
 model ProductCategory {
@@ -550,38 +605,47 @@ model PurchaseReturn {
 }
 
 model Invoice {
-  id             Int         @id @default(autoincrement())
-  shopId         Int         @map("shop_id")
-  customerId     Int?        @map("customer_id")
-  methodId       Int         @map("method_id")
-  invId          String      @map("inv_id")
-  name           String      @default("")
-  phone          String?
-  address        String?
-  date           DateTime    @db.Date
-  subtotal       Decimal     @default(0) @db.Decimal(20, 2)
-  discount       Decimal     @default(0) @db.Decimal(20, 2)
-  tax            Decimal     @default(0) @db.Decimal(20, 2)
-  totalPrice     Decimal     @map("total_price") @db.Decimal(20, 2)
-  paidAmount     Decimal     @default(0) @map("paid_amount") @db.Decimal(20, 2)
-  duePrice       Decimal     @default(0) @map("due_price") @db.Decimal(20, 2)
-  returnedAmount Decimal     @default(0) @map("returned_amount") @db.Decimal(20, 2)
-  qty            Int         @default(0)
-  type           InvoiceType @default(pos)
-  status         Int         @default(0)
-  medicines      Json?
-  createdAt      DateTime    @default(now()) @map("created_at")
-  updatedAt      DateTime    @updatedAt @map("updated_at")
+  id                   Int         @id @default(autoincrement())
+  shopId               Int         @map("shop_id")
+  customerId           Int?        @map("customer_id")
+  methodId             Int         @map("method_id")
+  sessionId            Int?        @map("session_id")
+  insuranceCompanyId   Int?        @map("insurance_company_id")
+  invId                String      @map("inv_id")
+  name                 String      @default("")
+  phone                String?
+  address              String?
+  date                 DateTime    @db.Date
+  subtotal             Decimal     @default(0) @db.Decimal(20, 2)
+  discount             Decimal     @default(0) @db.Decimal(20, 2)
+  tax                  Decimal     @default(0) @db.Decimal(20, 2)
+  taxRatePercent       Decimal     @default(0) @map("tax_rate_percent") @db.Decimal(5, 2)
+  totalPrice           Decimal     @map("total_price") @db.Decimal(20, 2)
+  paidAmount           Decimal     @default(0) @map("paid_amount") @db.Decimal(20, 2)
+  duePrice             Decimal     @default(0) @map("due_price") @db.Decimal(20, 2)
+  returnedAmount       Decimal     @default(0) @map("returned_amount") @db.Decimal(20, 2)
+  insurancePercent     Decimal     @default(0) @map("insurance_percent") @db.Decimal(5, 2)
+  insuranceAmount      Decimal     @default(0) @map("insurance_amount") @db.Decimal(20, 2)
+  qty                  Int         @default(0)
+  type                 InvoiceType @default(pos)
+  status               Int         @default(0)
+  medicines            Json?
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
 
-  shop        Shop          @relation(fields: [shopId], references: [id])
-  customer    Customer?     @relation(fields: [customerId], references: [id])
-  method      PaymentMethod @relation(fields: [methodId], references: [id])
-  pays        InvoicePay[]
-  saleReturns SaleReturn[]
+  shop             Shop              @relation(fields: [shopId], references: [id])
+  customer         Customer?         @relation(fields: [customerId], references: [id])
+  method           PaymentMethod     @relation(fields: [methodId], references: [id])
+  session          PosSession?       @relation(fields: [sessionId], references: [id])
+  insuranceCompany InsuranceCompany? @relation(fields: [insuranceCompanyId], references: [id])
+  pays             InvoicePay[]
+  saleReturns      SaleReturn[]
 
   @@unique([shopId, invId])
   @@index([shopId])
   @@index([customerId])
+  @@index([sessionId])
+  @@index([insuranceCompanyId])
   @@map("invoices")
 }
 
@@ -635,6 +699,9 @@ model PosCart {
   userId               Int          @map("user_id")
   customerId           Int?         @map("customer_id")
   methodId             Int?         @map("method_id")
+  insuranceCompanyId   Int?         @map("insurance_company_id")
+  insurancePercent     Decimal?     @map("insurance_percent") @db.Decimal(5, 2)
+  patientMethodId      Int?         @map("patient_method_id")
   /// Overrides shop.taxRatePercent for this cart only when set.
   taxRateOverride      Decimal?     @map("tax_rate_override") @db.Decimal(5, 2)
   /// Overrides the computed tax amount outright when set (takes precedence over taxRateOverride).
@@ -646,7 +713,8 @@ model PosCart {
   createdAt            DateTime     @default(now()) @map("created_at")
   updatedAt            DateTime     @updatedAt @map("updated_at")
 
-  shop Shop @relation(fields: [shopId], references: [id])
+  shop             Shop              @relation(fields: [shopId], references: [id])
+  insuranceCompany InsuranceCompany? @relation(fields: [insuranceCompanyId], references: [id])
 
   @@index([shopId, userId])
   @@map("pos_carts")

@@ -32,6 +32,9 @@ export const updateCartSchema = z
         type: z.enum(['percent', 'fixed']),
       })
       .optional(),
+    insuranceCompanyId: z.coerce.number().int().positive().nullable().optional(),
+    insurancePercent: z.coerce.number().min(0).max(100).nullable().optional(),
+    patientMethodId: z.coerce.number().int().positive().nullable().optional(),
   })
   .refine((data) => data.taxRate === undefined || data.taxAmount === undefined, {
     message: 'Provide either taxRate or taxAmount, not both',

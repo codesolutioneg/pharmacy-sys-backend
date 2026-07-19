@@ -181,6 +181,19 @@ const groups: Record<string, Array<{ label: string; name: string }>> = {
     { label: 'Ledger Store', name: 'accounting.ledger.store' },
     { label: 'Reports Index', name: 'accounting.reports.index' },
   ],
+  Session: [
+    { label: 'Open', name: 'session.open' },
+    { label: 'Close', name: 'session.close' },
+    { label: 'Index', name: 'session.index' },
+    { label: 'Show', name: 'session.show' },
+  ],
+  Insurance: [
+    { label: 'Index', name: 'insurance.index' },
+    { label: 'Store', name: 'insurance.store' },
+    { label: 'Show', name: 'insurance.show' },
+    { label: 'Update', name: 'insurance.update' },
+    { label: 'Delete', name: 'insurance.destroy' },
+  ],
 };
 
 /** Note: Laravel seeder duplicated `language.destroy` for Terms Edit; Node uses `language.terms.update` for clarity while keeping destroy. */

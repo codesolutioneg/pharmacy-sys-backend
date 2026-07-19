@@ -51,7 +51,11 @@ export const posCartController = {
   },
 
   async checkout(req: Request, res: Response) {
-    const data = await posCartService.checkout(req.user!.shopId, req.body.cartId);
+    const data = await posCartService.checkout(
+      req.user!.shopId,
+      req.body.cartId,
+      req.user!.userId,
+    );
     return sendCreated(res, data);
   },
 };

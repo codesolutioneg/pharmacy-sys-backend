@@ -25,7 +25,7 @@ export const paymentMethodsService = {
     return method;
   },
 
-  async create(shopId: number, data: { name: string; balance?: number }) {
+  async create(shopId: number, data: { name: string; balance?: number; isInsurance?: boolean }) {
     const existing = await prisma.paymentMethod.findFirst({
       where: { shopId, name: data.name },
     });
@@ -37,11 +37,12 @@ export const paymentMethodsService = {
         shopId,
         name: data.name,
         balance: toMoneyString(data.balance ?? 0),
+        isInsurance: data.isInsurance ?? false,
       },
     });
   },
 
-  async update(shopId: number, id: number, data: { name?: string }) {
+  async update(shopId: number, id: number, data: { name?: string; isInsurance?: boolean }) {
     const method = await this.getById(shopId, id);
     if (data.name && data.name !== method.name) {
       const clash = await prisma.paymentMethod.findFirst({
@@ -53,7 +54,7 @@ export const paymentMethodsService = {
     }
     return prisma.paymentMethod.update({
       where: { id },
-      data: { name: data.name },
+      data: { name: data.name, isInsurance: data.isInsurance },
     });
   },
 

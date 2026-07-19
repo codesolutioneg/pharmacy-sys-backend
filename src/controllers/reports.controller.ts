@@ -56,4 +56,14 @@ export const reportsController = {
     const buffer = await reportsService.profitLossExport(req.user!.shopId, dateRange(req));
     sendXlsx(res, 'profit-loss.xlsx', buffer);
   },
+
+  async paymentMethodTotals(req: Request, res: Response) {
+    const data = await reportsService.paymentMethodTotals(req.user!.shopId, dateRange(req));
+    return sendSuccess(res, data);
+  },
+
+  async insuranceDues(req: Request, res: Response) {
+    const data = await reportsService.insuranceDues(req.user!.shopId);
+    return sendSuccess(res, data);
+  },
 };

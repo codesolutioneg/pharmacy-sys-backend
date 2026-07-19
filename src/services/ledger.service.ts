@@ -9,6 +9,7 @@ export const ACCOUNT_IDS = {
   SALES: 2,
   ACCOUNTS_PAYABLE: 3,
   ACCOUNTS_RECEIVABLE: 4,
+  INSURANCE_RECEIVABLE: 5,
 } as const;
 
 function generateTranId(prefix: string): string {
@@ -103,6 +104,46 @@ export const ledgerService = {
       particular: `Sale on Invoice ${params.invoiceId}`,
       date: params.date ?? new Date(),
     });
+  },
+
+  /**
+   * Insurance split sale: CR Sales(2) grandTotal via two DR legs —
+   * DR Insurance Receivable(5) insuranceAmount + DR Accounts Receivable(4) patientAmount.
+   */
+  async saleWithInsuranceTransaction(
+    tx: TxClient,
+    params: {
+      patientAmount: Prisma.Decimal.Value;
+      insuranceAmount: Prisma.Decimal.Value;
+      invoiceId: string;
+      date?: Date;
+    },
+  ) {
+    const date = params.date ?? new Date();
+    const patient = toMoneyString(params.patientAmount);
+    const insurance = toMoneyString(params.insuranceAmount);
+    if (Number(patient) > 0) {
+      await createLedgerEntry(tx, {
+        debitAccountId: ACCOUNT_IDS.ACCOUNTS_RECEIVABLE,
+        creditAccountId: ACCOUNT_IDS.SALES,
+        amount: patient,
+        invoiceType: 'sale',
+        invoiceId: params.invoiceId,
+        particular: `Sale (patient share) on Invoice ${params.invoiceId}`,
+        date,
+      });
+    }
+    if (Number(insurance) > 0) {
+      await createLedgerEntry(tx, {
+        debitAccountId: ACCOUNT_IDS.INSURANCE_RECEIVABLE,
+        creditAccountId: ACCOUNT_IDS.SALES,
+        amount: insurance,
+        invoiceType: 'sale',
+        invoiceId: params.invoiceId,
+        particular: `Sale (insurance share) on Invoice ${params.invoiceId}`,
+        date,
+      });
+    }
   },
 
   /** Reverse of saleTransaction: debit Sales (2) / credit Accounts Receivable (4) — Node addition. */

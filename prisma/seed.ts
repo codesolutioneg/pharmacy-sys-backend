@@ -124,6 +124,7 @@ async function seedAccounting(): Promise<void> {
     { id: 2, name: 'Sales', type: 'Revenue' },
     { id: 3, name: 'Accounts Payable', type: 'Liability' },
     { id: 4, name: 'Accounts Receivable', type: 'Asset' },
+    { id: 5, name: 'Insurance Receivable', type: 'Asset' },
   ];
   for (const a of accountSeeds) {
     await prisma.account.upsert({

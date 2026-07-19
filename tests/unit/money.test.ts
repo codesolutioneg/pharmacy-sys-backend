@@ -75,3 +75,74 @@ describe('deriveDueChange', () => {
     expect(change.toFixed(2)).toBe('0.00');
   });
 });
+
+describe('insurance split formulas', () => {
+  it('splits grandTotal by insurance percent', () => {
+    const grandTotal = 200;
+    const insurancePercent = 70;
+    const insuranceAmount = pct(grandTotal, insurancePercent);
+    const patientAmount = sub(grandTotal, insuranceAmount);
+    expect(insuranceAmount.toFixed(2)).toBe('140.00');
+    expect(patientAmount.toFixed(2)).toBe('60.00');
+  });
+
+  it('patient due/change when underpaying co-pay', () => {
+    const patientAmount = 60;
+    const paid = 40;
+    const patientDue = sub(patientAmount, paid);
+    const change = paid > patientAmount ? sub(paid, patientAmount) : round2(0);
+    expect(patientDue.toFixed(2)).toBe('20.00');
+    expect(change.toFixed(2)).toBe('0.00');
+  });
+
+  it('patient change when overpaying co-pay', () => {
+    const patientAmount = 60;
+    const paid = 80;
+    const patientDue = paid >= patientAmount ? round2(0) : sub(patientAmount, paid);
+    const change = sub(paid, patientAmount);
+    expect(patientDue.toFixed(2)).toBe('0.00');
+    expect(change.toFixed(2)).toBe('20.00');
+  });
+});
+
+describe('tax formulas', () => {
+  it('exclusive tax = taxable * rate / 100', () => {
+    const taxable = 100;
+    const tax = pct(taxable, 14);
+    const grand = add(taxable, tax);
+    expect(tax.toFixed(2)).toBe('14.00');
+    expect(grand.toFixed(2)).toBe('114.00');
+  });
+
+  it('inclusive tax embedded in taxable', () => {
+    const taxable = 114;
+    const rate = 14;
+    const beforeTax = round2(toMoneyString(taxable / (1 + rate / 100)));
+    // Using string path: 114 / 1.14 = 100
+    expect(Number((114 / 1.14).toFixed(2))).toBe(100);
+    const tax = sub(taxable, 100);
+    expect(tax.toFixed(2)).toBe('14.00');
+    expect(beforeTax.toFixed(2)).toBe('100.00');
+  });
+
+  it('zero-rated / exempt → tax = 0, grand = taxable', () => {
+    const taxable = 100;
+    const tax = round2(0);
+    const grand = taxable;
+    expect(tax.toFixed(2)).toBe('0.00');
+    expect(grand).toBe(100);
+  });
+});
+
+describe('session cash reconciliation formula', () => {
+  it('expectedCash = openingFloat + cashPays - cashReturns', () => {
+    const openingFloat = 100;
+    const cashPays = 250;
+    const cashReturns = 30;
+    const expected = sub(add(openingFloat, cashPays), cashReturns);
+    const counted = 310;
+    const difference = sub(counted, expected);
+    expect(expected.toFixed(2)).toBe('320.00');
+    expect(difference.toFixed(2)).toBe('-10.00');
+  });
+});

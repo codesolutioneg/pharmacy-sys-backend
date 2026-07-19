@@ -8,6 +8,7 @@ import {
   calculateDiscountedPrice,
   deriveDueChange,
   mul,
+  pct,
   round2,
   sub,
   toDecimal,
@@ -15,6 +16,7 @@ import {
 } from '../utils/money';
 import { ledgerService } from './ledger.service';
 import { invoicesService } from './invoices.service';
+import { posSessionService } from './pos-session.service';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -42,6 +44,9 @@ type UpdateCartMetaInput = {
   taxRate?: number | null;
   taxAmount?: number | null;
   invoiceDiscount?: { value: number; type: DiscountType };
+  insuranceCompanyId?: number | null;
+  insurancePercent?: number | null;
+  patientMethodId?: number | null;
 };
 
 type CartMeta = {
@@ -331,6 +336,29 @@ export const posCartService = {
         throw new AppError(400, 'INVALID_PAYMENT_METHOD', 'Payment method not found for this shop');
       }
     }
+    if (data.patientMethodId !== undefined && data.patientMethodId !== null) {
+      const patientMethod = await prisma.paymentMethod.findFirst({
+        where: { id: data.patientMethodId, shopId },
+      });
+      if (!patientMethod) {
+        throw new AppError(400, 'INVALID_PAYMENT_METHOD', 'Patient payment method not found');
+      }
+      if (patientMethod.isInsurance) {
+        throw new AppError(
+          422,
+          'INVALID_PATIENT_METHOD',
+          'Patient co-pay method cannot be an insurance method',
+        );
+      }
+    }
+    if (data.insuranceCompanyId !== undefined && data.insuranceCompanyId !== null) {
+      const company = await prisma.insuranceCompany.findFirst({
+        where: { id: data.insuranceCompanyId, shopId, status: 'active' },
+      });
+      if (!company) {
+        throw new AppError(400, 'INVALID_INSURANCE_COMPANY', 'Insurance company not found');
+      }
+    }
     if (data.taxRate !== undefined && data.taxAmount !== undefined) {
       throw new AppError(
         400,
@@ -357,6 +385,14 @@ export const posCartService = {
           ? toMoneyString(data.invoiceDiscount.value)
           : undefined,
         invoiceDiscountType: data.invoiceDiscount ? data.invoiceDiscount.type : undefined,
+        insuranceCompanyId: data.insuranceCompanyId,
+        insurancePercent:
+          data.insurancePercent !== undefined
+            ? data.insurancePercent === null
+              ? null
+              : toMoneyString(data.insurancePercent)
+            : undefined,
+        patientMethodId: data.patientMethodId,
       },
     });
   },
@@ -365,6 +401,9 @@ export const posCartService = {
     id: number;
     customerId: number | null;
     methodId: number | null;
+    insuranceCompanyId: number | null;
+    insurancePercent: Prisma.Decimal | null;
+    patientMethodId: number | null;
     paidAmount: Prisma.Decimal;
     taxRateOverride: Prisma.Decimal | null;
     taxAmountOverride: Prisma.Decimal | null;
@@ -375,12 +414,35 @@ export const posCartService = {
     const shop = await getShopOrThrow(shopId);
     const items = toItemRecords(cart.items);
     const totals = computeCartTotals(shop, cart, items);
+
+    let insuranceAmount = toDecimal(0);
+    let patientAmount = totals.grandTotal;
+    const insurancePercent =
+      cart.insurancePercent !== null ? toDecimal(cart.insurancePercent.toString()) : toDecimal(0);
+    if (insurancePercent.greaterThan(0)) {
+      insuranceAmount = pct(totals.grandTotal, insurancePercent);
+      patientAmount = sub(totals.grandTotal, insuranceAmount);
+    }
+    const paid = totals.paid;
+    const patientPaid = Decimal.min(paid, patientAmount);
+    const patientDue = sub(patientAmount, patientPaid);
+    const change = paid.greaterThan(patientAmount) ? sub(paid, patientAmount) : toDecimal(0);
+
+    const taxRateUsed =
+      cart.taxRateOverride !== null
+        ? cart.taxRateOverride.toFixed(2)
+        : shop.taxRatePercent.toFixed(2);
+
     return {
       id: cart.id,
       customerId: cart.customerId,
       paymentMethodId: cart.methodId,
+      insuranceCompanyId: cart.insuranceCompanyId,
+      insurancePercent: cart.insurancePercent !== null ? cart.insurancePercent.toFixed(2) : null,
+      patientMethodId: cart.patientMethodId,
       paidAmount: totals.paid.toFixed(2),
       taxRate: cart.taxRateOverride !== null ? cart.taxRateOverride.toFixed(2) : null,
+      taxRateUsed,
       taxAmount: cart.taxAmountOverride !== null ? cart.taxAmountOverride.toFixed(2) : null,
       invoiceDiscount: {
         value: toDecimal(cart.invoiceDiscountValue.toString()).toFixed(2),
@@ -403,9 +465,11 @@ export const posCartService = {
       taxableAmount: totals.taxable.toFixed(2),
       taxAmountComputed: totals.taxAmount.toFixed(2),
       grandTotal: totals.grandTotal.toFixed(2),
+      insuranceAmount: insuranceAmount.toFixed(2),
+      patientAmount: patientAmount.toFixed(2),
       qty: totals.qty,
-      due: totals.due.toFixed(2),
-      change: totals.change.toFixed(2),
+      due: (insurancePercent.greaterThan(0) ? patientDue : totals.due).toFixed(2),
+      change: (insurancePercent.greaterThan(0) ? change : totals.change).toFixed(2),
     };
   },
 
@@ -414,10 +478,11 @@ export const posCartService = {
     return this.buildCartView(shopId, cart);
   },
 
-  async checkout(shopId: number, cartId: number) {
+  async checkout(shopId: number, cartId: number, userId: number) {
     const cart = await this.getOpenCart(shopId, cartId);
     const shop = await getShopOrThrow(shopId);
     const items = toItemRecords(cart.items);
+    const session = await posSessionService.requireOpenSession(shopId, userId);
 
     if (items.length === 0) {
       throw new AppError(422, 'EMPTY_CART', 'Cannot checkout an empty cart');
@@ -433,10 +498,11 @@ export const posCartService = {
     }
 
     const totals = computeCartTotals(shop, cart, items);
+    const taxRateUsed =
+      cart.taxRateOverride !== null
+        ? cart.taxRateOverride.toString()
+        : shop.taxRatePercent.toString();
 
-    if (totals.due.greaterThan(0) && !cart.customerId) {
-      throw new AppError(422, 'CUSTOMER_REQUIRED', 'A customer is required when dueAmount > 0');
-    }
     if (!cart.methodId) {
       throw new AppError(422, 'PAYMENT_METHOD_REQUIRED', 'A payment method is required to checkout');
     }
@@ -444,6 +510,75 @@ export const posCartService = {
     const method = await prisma.paymentMethod.findFirst({ where: { id: cart.methodId, shopId } });
     if (!method) {
       throw new AppError(400, 'INVALID_PAYMENT_METHOD', 'Payment method not found for this shop');
+    }
+
+    const isInsuranceSale = method.isInsurance;
+    let insuranceCompany = null;
+    let insurancePercent = toDecimal(0);
+    let insuranceAmount = toDecimal(0);
+    let patientAmount = totals.grandTotal;
+    let patientMethod = method;
+    let paid = totals.paid;
+    let due = totals.due;
+    let change = totals.change;
+
+    if (isInsuranceSale) {
+      if (!cart.insuranceCompanyId) {
+        throw new AppError(
+          422,
+          'INSURANCE_COMPANY_REQUIRED',
+          'Select an insurance company for insurance payments',
+        );
+      }
+      insuranceCompany = await prisma.insuranceCompany.findFirst({
+        where: { id: cart.insuranceCompanyId, shopId, status: 'active' },
+      });
+      if (!insuranceCompany) {
+        throw new AppError(400, 'INVALID_INSURANCE_COMPANY', 'Insurance company not found');
+      }
+
+      insurancePercent =
+        cart.insurancePercent !== null
+          ? toDecimal(cart.insurancePercent.toString())
+          : toDecimal(insuranceCompany.defaultDiscountPercent.toString());
+      if (insurancePercent.lessThanOrEqualTo(0) || insurancePercent.greaterThan(100)) {
+        throw new AppError(
+          422,
+          'INVALID_INSURANCE_PERCENT',
+          'Insurance percent must be between 0 and 100 exclusive of 0',
+        );
+      }
+
+      if (!cart.patientMethodId) {
+        throw new AppError(
+          422,
+          'PATIENT_METHOD_REQUIRED',
+          'Select a co-pay payment method for the patient share',
+        );
+      }
+      const pm = await prisma.paymentMethod.findFirst({
+        where: { id: cart.patientMethodId, shopId },
+      });
+      if (!pm || pm.isInsurance) {
+        throw new AppError(
+          422,
+          'INVALID_PATIENT_METHOD',
+          'Patient co-pay method must be a non-insurance payment method',
+        );
+      }
+      patientMethod = pm;
+
+      insuranceAmount = pct(totals.grandTotal, insurancePercent);
+      patientAmount = sub(totals.grandTotal, insuranceAmount);
+      paid = Decimal.min(totals.paid, patientAmount);
+      due = sub(patientAmount, paid);
+      change = totals.paid.greaterThan(patientAmount)
+        ? sub(totals.paid, patientAmount)
+        : toDecimal(0);
+    }
+
+    if (due.greaterThan(0) && !cart.customerId) {
+      throw new AppError(422, 'CUSTOMER_REQUIRED', 'A customer is required when dueAmount > 0');
     }
 
     let customer = null;
@@ -460,7 +595,6 @@ export const posCartService = {
 
       const snapshot = [];
       for (const line of totals.lines) {
-        // Row lock prevents concurrent oversell under READ COMMITTED.
         const locked = await tx.$queryRaw<Array<{ id: number; qty: number }>>`
           SELECT id, qty FROM batches
           WHERE id = ${line.batchId as number} AND shop_id = ${shopId}
@@ -500,7 +634,9 @@ export const posCartService = {
         data: {
           shopId,
           customerId: customer?.id ?? null,
-          methodId: method.id,
+          methodId: isInsuranceSale ? patientMethod.id : method.id,
+          sessionId: session.id,
+          insuranceCompanyId: insuranceCompany?.id ?? null,
           invId,
           name: customer?.name ?? '',
           phone: customer?.phone ?? null,
@@ -508,46 +644,63 @@ export const posCartService = {
           subtotal: toMoneyString(totals.subtotal),
           discount: toMoneyString(totals.invoiceDiscountAmount),
           tax: toMoneyString(totals.taxAmount),
+          taxRatePercent: toMoneyString(taxRateUsed),
           totalPrice: toMoneyString(totals.grandTotal),
-          paidAmount: toMoneyString(totals.paid),
-          duePrice: toMoneyString(totals.due),
-          returnedAmount: toMoneyString(totals.change),
+          paidAmount: toMoneyString(paid),
+          duePrice: toMoneyString(due),
+          returnedAmount: toMoneyString(change),
+          insurancePercent: toMoneyString(insurancePercent),
+          insuranceAmount: toMoneyString(insuranceAmount),
           qty: totals.qty,
           type: 'pos',
           medicines: snapshot as unknown as Prisma.InputJsonValue,
         },
       });
 
-      await tx.invoicePay.create({
-        data: {
-          shopId,
-          invoiceId: invoice.id,
-          customerId: customer?.id ?? null,
-          methodId: method.id,
-          amount: toMoneyString(totals.paid),
-          date,
-        },
-      });
-
-      if (totals.paid.greaterThan(0)) {
+      if (paid.greaterThan(0)) {
+        await tx.invoicePay.create({
+          data: {
+            shopId,
+            invoiceId: invoice.id,
+            customerId: customer?.id ?? null,
+            methodId: patientMethod.id,
+            amount: toMoneyString(paid),
+            date,
+          },
+        });
         await tx.paymentMethod.update({
-          where: { id: method.id },
-          data: { balance: add(method.balance.toString(), totals.paid).toFixed(2) },
+          where: { id: patientMethod.id },
+          data: { balance: add(patientMethod.balance.toString(), paid).toFixed(2) },
         });
       }
 
-      if (totals.due.greaterThan(0) && customer) {
+      if (due.greaterThan(0) && customer) {
         await tx.customer.update({
           where: { id: customer.id },
-          data: { due: add(customer.due.toString(), totals.due).toFixed(2) },
+          data: { due: add(customer.due.toString(), due).toFixed(2) },
         });
       }
 
-      await ledgerService.saleTransaction(tx, {
-        amount: totals.grandTotal,
-        invoiceId: invId,
-        date,
-      });
+      if (isInsuranceSale && insuranceCompany && insuranceAmount.greaterThan(0)) {
+        await tx.insuranceCompany.update({
+          where: { id: insuranceCompany.id },
+          data: {
+            due: add(insuranceCompany.due.toString(), insuranceAmount).toFixed(2),
+          },
+        });
+        await ledgerService.saleWithInsuranceTransaction(tx, {
+          patientAmount,
+          insuranceAmount,
+          invoiceId: invId,
+          date,
+        });
+      } else {
+        await ledgerService.saleTransaction(tx, {
+          amount: totals.grandTotal,
+          invoiceId: invId,
+          date,
+        });
+      }
 
       await tx.posCart.delete({ where: { id: cart.id } });
 

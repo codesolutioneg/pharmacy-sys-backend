@@ -256,4 +256,65 @@ export const reportsService = {
       [data],
     );
   },
+
+  /** Sum of InvoicePay amounts grouped by payment method for a date range. */
+  async paymentMethodTotals(shopId: number, range: DateRange) {
+    const { from, to } = await resolveRange(shopId, range);
+    const pays = await prisma.invoicePay.findMany({
+      where: { shopId, date: { gte: from, lte: to } },
+      include: { method: { select: { id: true, name: true, isInsurance: true } } },
+    });
+    const map = new Map<
+      number,
+      { methodId: number; name: string; isInsurance: boolean; amount: ReturnType<typeof toDecimal>; count: number }
+    >();
+    for (const pay of pays) {
+      const prev = map.get(pay.methodId);
+      const next = toDecimal(prev?.amount.toString() ?? '0').plus(pay.amount.toString());
+      map.set(pay.methodId, {
+        methodId: pay.methodId,
+        name: pay.method.name,
+        isInsurance: pay.method.isInsurance,
+        amount: toDecimal(next.toString()),
+        count: (prev?.count ?? 0) + 1,
+      });
+    }
+    const items = [...map.values()]
+      .map((row, index) => ({
+        sn: index + 1,
+        methodId: row.methodId,
+        name: row.name,
+        isInsurance: row.isInsurance,
+        amount: row.amount.toFixed(2),
+        count: row.count,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const total = items.reduce((acc, row) => acc.plus(row.amount), toDecimal(0));
+    return {
+      from: isoDate(from),
+      to: isoDate(to),
+      items,
+      totals: { amount: total.toFixed(2), count: pays.length },
+      meta: generatedAtMeta(),
+    };
+  },
+
+  /** Point-in-time insurance companies with due > 0. */
+  async insuranceDues(shopId: number) {
+    const companies = await prisma.insuranceCompany.findMany({
+      where: { shopId, due: { gt: 0 } },
+      orderBy: [{ due: 'desc' }, { id: 'asc' }],
+    });
+    return {
+      items: companies.map((c, index) => ({
+        sn: index + 1,
+        id: c.id,
+        name: c.name,
+        nameAr: c.nameAr,
+        phone: c.phone,
+        due: c.due.toFixed(2),
+      })),
+      meta: { ...generatedAtMeta(), total: companies.length },
+    };
+  },
 };

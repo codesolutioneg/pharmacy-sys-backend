@@ -16,6 +16,7 @@ import { purchasesRouter } from './purchases.routes';
 import { purchaseReturnsRouter } from './purchase-returns.routes';
 import { batchesRouter, stockRouter } from './stock.routes';
 import { posCartRouter } from './pos-cart.routes';
+import { posSessionRouter } from './pos-session.routes';
 import { invoicesRouter } from './invoices.routes';
 import { doctorsRouter } from './doctors.routes';
 import { patientsRouter } from './patients.routes';
@@ -32,6 +33,7 @@ import { languagesRouter } from './languages.routes';
 import { notificationsRouter } from './notifications.routes';
 import { reportsRouter } from './reports.routes';
 import { dashboardRouter } from './dashboard.routes';
+import { insuranceCompaniesRouter } from './insurance-companies.routes';
 
 export const v1Router = Router();
 
@@ -54,6 +56,7 @@ v1Router.use('/purchases', purchasesRouter);
 v1Router.use('/purchase-returns', purchaseReturnsRouter);
 v1Router.use('/batches', batchesRouter);
 v1Router.use('/stock', stockRouter);
+v1Router.use('/pos', posSessionRouter);
 v1Router.use('/pos', posCartRouter);
 v1Router.use('/invoices', invoicesRouter);
 v1Router.use('/doctors', doctorsRouter);
@@ -70,3 +73,4 @@ v1Router.use('/reports', reportsRouter);
 v1Router.use('/languages', languagesRouter);
 v1Router.use('/notifications', notificationsRouter);
 v1Router.use('/dashboard', dashboardRouter);
+v1Router.use('/insurance-companies', insuranceCompaniesRouter);

@@ -58,3 +58,16 @@ reportsRouter.get(
   validate(reportDateRangeQuerySchema, 'query'),
   asyncHandler(reportsController.profitLossExport),
 );
+
+reportsRouter.get(
+  '/payment-methods',
+  authorize('report.sale_purchase'),
+  validate(reportDateRangeQuerySchema, 'query'),
+  asyncHandler(reportsController.paymentMethodTotals),
+);
+
+reportsRouter.get(
+  '/insurance-dues',
+  authorize('report.due_customer'),
+  asyncHandler(reportsController.insuranceDues),
+);
